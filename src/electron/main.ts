@@ -28,6 +28,7 @@ async function createWindow(): Promise<void> {
         syncToken: config.syncToken,
         syncAdminEmail: config.syncAdminEmail,
         syncAdminPassword: config.syncAdminPassword,
+        resultExportRootPath: app.getPath('downloads'),
     });
 
     mainWindow = new BrowserWindow({

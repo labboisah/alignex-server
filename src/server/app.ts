@@ -36,6 +36,7 @@ export type StartCenterServerOptions = {
     syncToken?: string | null;
     syncAdminEmail?: string | null;
     syncAdminPassword?: string | null;
+    resultExportRootPath?: string | null;
 };
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -398,7 +399,10 @@ export async function startCenterServer(options: StartCenterServerOptions): Prom
     app.post('/api/results/export', (request, response) => {
         try {
             assertPlanFeature(database.connection, 'result_package_export');
-            const summary = exportExamResults(database.connection, String(request.body.exam_id ?? ''), database.path);
+            const summary = exportExamResults(database.connection, String(request.body.exam_id ?? ''), {
+                fallbackStoragePath: database.path,
+                rootPath: options.resultExportRootPath,
+            });
             socketServer.emit('server:status', statusService.getStatus());
             response.json({ success: true, summary });
         } catch (error) {

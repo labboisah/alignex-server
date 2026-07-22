@@ -113,6 +113,12 @@ export function ActiveMonitorPage() {
         void refresh();
     }, []);
 
+    useEffect(() => {
+        const timer = window.setInterval(() => void refresh(), 5000);
+
+        return () => window.clearInterval(timer);
+    }, [exam?.id]);
+
     function showToast(nextToast: { tone: 'success' | 'danger'; message: string }) {
         setToast(nextToast);
         window.setTimeout(() => setToast(null), 4200);

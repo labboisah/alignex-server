@@ -98,7 +98,11 @@ export class ResultExportError extends Error {
     }
 }
 
-export function exportExamResults(connection: Database, examId: string, storagePath: string): ResultExportSummary {
+export function exportExamResults(
+    connection: Database,
+    examId: string,
+    options: { rootPath?: string | null; fallbackStoragePath: string },
+): ResultExportSummary {
     if (!examId.trim()) {
         throw new ResultExportError('Exam ID is required.', 'exam_id_required', 422);
     }
@@ -122,7 +126,7 @@ export function exportExamResults(connection: Database, examId: string, storageP
     }
 
     const exportedAt = new Date().toISOString();
-    const exportFolderPath = join(dirname(storagePath), 'exports', sanitizePathSegment(exam.exam_code));
+    const exportFolderPath = join(resolveExportRootPath(options), 'AlignEx Results', sanitizePathSegment(exam.exam_code));
     const jsonFilename = `${sanitizePathSegment(exam.exam_code)}-results.json`;
     const csvFilename = `${sanitizePathSegment(exam.exam_code)}-results.csv`;
     const jsonPath = join(exportFolderPath, jsonFilename);
@@ -203,6 +207,12 @@ export function exportExamResults(connection: Database, examId: string, storageP
         result_hash: resultHash,
         exported_at: exportedAt,
     };
+}
+
+function resolveExportRootPath(options: { rootPath?: string | null; fallbackStoragePath: string }): string {
+    return options.rootPath && options.rootPath.trim().length > 0
+        ? options.rootPath
+        : join(dirname(options.fallbackStoragePath), 'exports');
 }
 
 function loadCandidates(connection: Database, examId: string): CandidateRow[] {
