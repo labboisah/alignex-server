@@ -47,6 +47,12 @@ type OptionRow = {
     display_order: number;
 };
 
+type SubjectRow = {
+    id: string;
+    name: string;
+    code: string | null;
+};
+
 type PaperRow = {
     question_id: string;
     display_order: number;
@@ -68,6 +74,11 @@ export type CandidateExamPayload = {
         duration_minutes: number;
         total_questions: number;
     };
+    subjects: Array<{
+        id: string;
+        name: string;
+        code: string | null;
+    }>;
     questions: Array<{
         id: string;
         subject_id: string | null;
@@ -119,6 +130,7 @@ export function getCandidateExam(connection: Database, attemptToken: string): Ca
     const questionIds = paperRows.map((row) => row.question_id);
     const questionMap = loadQuestionMap(connection, questionIds);
     const optionMap = loadOptionMap(connection, questionIds);
+    const subjects = loadSubjects(connection, context.exam_id);
 
     const questions = paperRows
         .map((paperRow) => {
@@ -171,6 +183,7 @@ export function getCandidateExam(connection: Database, attemptToken: string): Ca
             duration_minutes: context.duration_minutes,
             total_questions: questions.length,
         },
+        subjects,
         questions,
         options,
         saved_answers: loadSavedAnswers(connection, context.attempt_id),
@@ -268,6 +281,15 @@ function getAttemptContext(connection: Database, attemptToken: string): AttemptC
     }
 
     return context;
+}
+
+function loadSubjects(connection: Database, examId: string): SubjectRow[] {
+    return connection.prepare(`
+        SELECT id, name, code
+        FROM subjects
+        WHERE exam_id = ?
+        ORDER BY rowid ASC
+    `).all(examId) as SubjectRow[];
 }
 
 function loadQuestionMap(connection: Database, questionIds: string[]): Map<string, QuestionRow> {

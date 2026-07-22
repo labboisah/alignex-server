@@ -1,4 +1,4 @@
-import { AlertTriangle, Loader2, RefreshCw, RotateCcw, ShieldAlert, Square, UserCheck, UserMinus, Users } from 'lucide-react';
+import { AlertTriangle, BookOpen, Loader2, RefreshCw, RotateCcw, ShieldAlert, Square, UserCheck, UserMinus, Users } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -15,6 +15,7 @@ type ExamSummary = {
 };
 
 type MonitorSummary = {
+    subject_count: number;
     total_candidates: number;
     not_started: number;
     active: number;
@@ -268,7 +269,8 @@ export function ActiveMonitorPage() {
 
             {!loading && !error && exam && summary && (
                 <>
-                    <section className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+                    <section className="grid gap-4 md:grid-cols-3 xl:grid-cols-7">
+                        <SummaryCard icon={<BookOpen className="h-5 w-5 text-primary" />} label="Subjects" value={summary.subject_count} />
                         <SummaryCard icon={<Users className="h-5 w-5 text-info" />} label="Total Candidates" value={summary.total_candidates} />
                         <SummaryCard icon={<UserCheck className="h-5 w-5 text-success" />} label="Active" value={summary.active} />
                         <SummaryCard icon={<UserCheck className="h-5 w-5 text-primary" />} label="Submitted" value={submittedTotal} />

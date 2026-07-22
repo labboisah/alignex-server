@@ -2,6 +2,7 @@ import type { Database } from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 
 export type MonitorSummary = {
+    subject_count: number;
     total_candidates: number;
     not_started: number;
     active: number;
@@ -49,6 +50,12 @@ type CandidateMonitorQueryRow = {
 };
 
 export function getMonitorSummary(connection: Database, examId: string, connectedCandidateIds: Set<string>): MonitorSummary {
+    const subjectCountRow = connection.prepare(`
+        SELECT COUNT(*) AS count
+        FROM subjects
+        WHERE exam_id = ?
+    `).get(examId) as { count: number };
+
     const rows = connection.prepare(`
         SELECT
             candidates.id,
@@ -64,6 +71,7 @@ export function getMonitorSummary(connection: Database, examId: string, connecte
     const statusFor = (row: { candidate_status: string; attempt_status: string | null }) => row.attempt_status ?? row.candidate_status;
 
     return {
+        subject_count: Number(subjectCountRow.count) || 0,
         total_candidates: rows.length,
         not_started: rows.filter((row) => statusFor(row) === 'not_started').length,
         active: rows.filter((row) => statusFor(row) === 'active').length,
