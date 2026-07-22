@@ -1,6 +1,6 @@
 # Center Server MVP Test Checklist
 
-Use this checklist to manually test the Import Exam Package MVP.
+Use this checklist to manually test the online exam fetch MVP.
 
 ## Start App
 
@@ -10,16 +10,14 @@ Use this checklist to manually test the Import Exam Package MVP.
 4. Confirm the top status bar shows Server Status as Online.
 5. Confirm Local IP Address and Candidate URL are visible.
 
-## Import Valid Package
+## Fetch Valid Online Exam
 
 1. Open Import Exam from the sidebar.
-2. Click Download Sample Package, or use `docs/samples/valid-exam-package.json`.
-3. Drag the JSON file into the upload area or use the file picker.
-4. Confirm the selected filename appears.
-5. Click Import Package.
-6. Confirm the progress steps move through Read file, Validate JSON, and Save to SQLite.
-7. Confirm a success toast appears.
-8. Confirm the success summary shows:
+2. Enter a valid online exam code that exists on the AlignEx portal and is approved for this center.
+3. Click Fetch Exam.
+4. Confirm the progress steps move through Verify code and Fetch and save.
+5. Confirm a success toast appears.
+6. Confirm the success summary shows:
    - Exam Title
    - Exam Code
    - Organization
@@ -27,22 +25,22 @@ Use this checklist to manually test the Import Exam Package MVP.
    - Questions
    - Duration
    - Status
-9. Click View Imported Exams.
-10. Confirm the imported exam appears with status `ready`.
-11. Return to Dashboard and confirm Imported Exams count increased.
-12. Confirm the Exams sidebar badge count increased.
+7. Click View Imported Exams.
+8. Confirm the imported exam appears with status `ready`.
+9. Return to Dashboard and confirm Imported Exams count increased.
+10. Confirm the Exams sidebar badge count increased.
 
-## Duplicate Package
+## Duplicate Exam Fetch
 
-1. Import the same valid package again.
-2. Confirm the import fails.
+1. Fetch the same online exam code again.
+2. Confirm the fetch fails.
 3. Confirm the error says the package has already been imported.
 
-## Invalid Package
+## Invalid Online Exam Code
 
 1. Open Import Exam.
-2. Select `docs/samples/invalid-exam-package.json`.
-3. Click Import Package.
+2. Enter an invalid or unauthorized online exam code.
+3. Click Fetch Exam.
 4. Confirm a failure toast appears.
 5. Confirm detailed validation errors appear on the page.
 6. Confirm Imported Exams count does not increase.

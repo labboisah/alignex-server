@@ -23,6 +23,7 @@ export type PlanFeatureKey =
     | 'api_integration'
     | 'offline_activation'
     | 'exam_package_import'
+    | 'offline_question_authoring'
     | 'result_package_export'
     | 'email_notifications'
     | 'sms_notifications'
@@ -70,6 +71,7 @@ export const planFeatureLabels: Record<PlanFeatureKey, string> = {
     api_integration: 'API integration',
     offline_activation: 'Offline activation',
     exam_package_import: 'Exam package import',
+    offline_question_authoring: 'Offline question authoring',
     result_package_export: 'Result package export',
     email_notifications: 'Email notifications',
     sms_notifications: 'SMS notifications',

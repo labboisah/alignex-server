@@ -2,7 +2,7 @@
 
 This is the initial Electron desktop app for running an AlignEx CBT center server on a local machine. It starts a local Node/Express server when Electron launches, opens a React admin UI, prepares a SQLite database, exposes server health, and reports LAN access details for candidate machines.
 
-Exam import, candidate login, answer saving, scoring, and sync logic are intentionally not implemented yet.
+Candidate login, answer saving, scoring, and sync logic are intentionally not implemented yet.
 
 ## Stack
 
@@ -28,8 +28,8 @@ Exam import, candidate login, answer saving, scoring, and sync logic are intenti
 - Candidate URL is generated from the LAN IP and server port.
 - Socket.IO server is attached for future live monitoring.
 - Admin UI has a sidebar, top status bar, dashboard cards, loading state, and API error state.
-- Import Exam screen accepts a unique import code or a manual JSON package upload.
-- Import Exam can retrieve, validate, and save an MVP JSON package into SQLite.
+- Import Exam screen fetches approved online exams by code.
+- Import Exam can retrieve, validate, and save an MVP exam package into SQLite.
 
 ## Setup
 
@@ -140,13 +140,6 @@ The current package is JSON with these top-level keys:
 manifest, subjects, questions, options, candidates
 ```
 
-Sample packages:
-
-```text
-docs/samples/valid-exam-package.json
-docs/samples/invalid-exam-package.json
-```
-
 Manual MVP test steps:
 
 ```text
@@ -155,4 +148,4 @@ docs/mvp-test-checklist.md
 
 ## Next Step
 
-The next implementation phase should add offline exam package import without exposing answer keys to the candidate side.
+The next implementation phase should keep portal-fetched exam import as the only start path, while planning offline question authoring behind center plan activation.

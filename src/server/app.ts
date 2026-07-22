@@ -11,7 +11,7 @@ import { autoSubmitCandidateAttempt, CandidateSubmitError, submitCandidateAttemp
 import { createDatabase, type CenterDatabase } from './database.js';
 import { closeExam, ExamControlError, startExam } from './exam-control-service.js';
 import { getExamSummary, listExamCandidates, listExamSummaries, verifyExamPapers } from './exam-queries.js';
-import { DuplicatePackageError, ImportCodeError, importExamPackage, importExamPackageByCode, PackageValidationError } from './exam-import-service.js';
+import { DuplicatePackageError, ImportCodeError, importExamPackageByCode, PackageValidationError } from './exam-import-service.js';
 import { getCandidateSocketIdentity, getMonitorSummary, listMonitorCandidates, resetCandidateDevice } from './monitor-service.js';
 import { assertPlanFeature, PlanFeatureError } from './plan-features.js';
 import { exportExamResults, ResultExportError } from './result-export-service.js';
@@ -322,35 +322,6 @@ export async function startCenterServer(options: StartCenterServerOptions): Prom
             }
 
             response.status(500).json({ message: error instanceof Error ? error.message : 'Unable to close exam.' });
-        }
-    });
-
-    app.post('/api/exams/import', (request, response) => {
-        try {
-            assertPlanFeature(database.connection, 'exam_package_import');
-            const summary = importExamPackage(database.connection, request.body);
-            socketServer.emit('server:status', statusService.getStatus());
-            response.status(201).json({ summary });
-        } catch (error) {
-            if (error instanceof PlanFeatureError) {
-                response.status(error.statusCode).json({ message: error.message, feature: error.feature });
-                return;
-            }
-
-            if (error instanceof PackageValidationError) {
-                response.status(422).json({ message: error.message, errors: error.errors });
-                return;
-            }
-
-            if (error instanceof DuplicatePackageError) {
-                response.status(409).json({ message: error.message, errors: [error.message] });
-                return;
-            }
-
-            response.status(500).json({
-                message: 'Exam package import failed.',
-                errors: [error instanceof Error ? error.message : 'Unknown import error.'],
-            });
         }
     });
 
