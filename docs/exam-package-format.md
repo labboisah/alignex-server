@@ -1,6 +1,18 @@
+## Diagnostic pilot contract update — 8 September 2026
+
+The fixed-paper restrictions below remain in force. A separate alignex.diagnostic-offline.v1 HMAC-authenticated pilot path is now implemented at /api/adaptive-pilot, with the interface at /adaptive.html. It does not pass through the fixed-paper importer. See the cloud repository docs/exams/adaptive-pilot.md for setup, supported settings, leases, encryption, replay and restrictions. Both engine copies must stay byte-identical: cloud services/adaptive-pilot/kernel.cjs and center src/server/adaptive-kernel.cjs. Installed executables require rebuilding/distribution.
+
 # Exam Package Format
 
-The Center Server App MVP imports exam packages as JSON files. Import processing is not implemented yet, but this format defines the contract that the online AlignEx portal will export and the offline center server will later validate.
+The center server imports validated fixed-paper packages through exam-import-service.ts. The current contract requires candidate papers as well as the question, option and candidate arrays.
+
+## Capability boundary (8 September 2026)
+
+New portal exports declare manifest.package_contract = "alignex.fixed-paper.v1" and manifest.exam_mode = "traditional". Both declarations are optional only for legacy fixed-paper compatibility. An explicit unknown/null contract, non-traditional exam_mode or conflicting mode alias fails validation before SQLite access. Adaptive packages are unsupported, even when the online adaptive pilot is enabled.
+
+Missing declarations do not prove package provenance; signed adaptive packages, local engine dispatch and cloud replay/reconciliation remain future work. The importer guard applies to new imports, not historical stored packages. Existing binaries require a rebuilt/reviewed distribution to receive this change.
+
+Verification: run npm.cmd run build:main, then node scripts/test-packages.mjs. The runner uses Electron's native SQLite ABI and temporary databases; it does not rebuild dependencies or touch operational center data.
 
 ## File Type
 
@@ -16,7 +28,8 @@ The Center Server App MVP imports exam packages as JSON files. Import processing
   "subjects": [],
   "questions": [],
   "options": [],
-  "candidates": []
+  "candidates": [],
+  "papers": []
 }
 ```
 
@@ -100,6 +113,7 @@ Candidate records include access code hashes, not plain access codes.
   "exam_id": "exam-uuid",
   "candidate_no": "CAND-001",
   "full_name": "Ada Okafor",
+  "photo_url": "https://portal.example.test/storage/candidate-photos/cand-001.jpg",
   "access_code_hash": "$argon2id$hash-placeholder",
   "group_name": "Batch A"
 }
@@ -174,6 +188,7 @@ Candidate records include access code hashes, not plain access codes.
       "exam_id": "exam-2026-demo-001",
       "candidate_no": "CAND-001",
       "full_name": "Ada Okafor",
+      "photo_url": "https://portal.example.test/storage/candidate-photos/cand-001.jpg",
       "access_code_hash": "$argon2id$hash-placeholder-001",
       "group_name": "Batch A"
     },
@@ -182,6 +197,7 @@ Candidate records include access code hashes, not plain access codes.
       "exam_id": "exam-2026-demo-001",
       "candidate_no": "CAND-002",
       "full_name": "Musa Bello",
+      "photo_url": null,
       "access_code_hash": "$argon2id$hash-placeholder-002",
       "group_name": "Batch A"
     }

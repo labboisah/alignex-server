@@ -5,6 +5,9 @@ export type ExamSummary = {
     title: string;
     exam_code: string;
     organization_name: string;
+    institution_name: string | null;
+    institution_type: string;
+    unit_label: string;
     status: 'ready' | 'active' | 'closed' | 'exported';
     start_at: string | null;
     end_at: string | null;
@@ -54,6 +57,9 @@ const examSummarySelect = `
         imported_exams.title,
         imported_exams.exam_code,
         imported_exams.organization_name,
+        imported_exams.institution_name,
+        imported_exams.institution_type,
+        imported_exams.unit_label,
         imported_exams.status,
         imported_exams.starts_at AS start_at,
         imported_exams.ends_at AS end_at,

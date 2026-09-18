@@ -1,4 +1,4 @@
-import { AlertTriangle, BookOpen, Loader2, RefreshCw, RotateCcw, ShieldAlert, Square, UserCheck, UserMinus, Users } from 'lucide-react';
+import { AlertTriangle, BookOpen, Clock3, Loader2, RefreshCw, RotateCcw, ShieldAlert, Square, UserCheck, UserMinus, Users } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -12,6 +12,11 @@ type ExamSummary = {
     title: string;
     exam_code: string;
     status: string;
+    start_at: string | null;
+    actual_started_at: string | null;
+    actual_closed_at: string | null;
+    duration_minutes: number;
+    unit_label?: string | null;
 };
 
 type MonitorSummary = {
@@ -30,6 +35,10 @@ type MonitorCandidate = {
     full_name: string;
     registration_number: string;
     status: string;
+    connected: boolean;
+    connected_at: string | null;
+    socket_id: string | null;
+    user_agent: string | null;
     answered_count: number;
     total_questions: number;
     unanswered_count: number;
@@ -66,16 +75,19 @@ export function ActiveMonitorPage() {
     const [error, setError] = useState<string | null>(null);
     const [toast, setToast] = useState<{ tone: 'success' | 'danger'; message: string } | null>(null);
     const [liveProcessingMessage, setLiveProcessingMessage] = useState<string | null>(null);
+    const [now, setNow] = useState(() => Date.now());
     const liveRefreshTimer = useRef<number | null>(null);
 
     const submittedTotal = (summary?.submitted ?? 0) + (summary?.auto_submitted ?? 0);
+    const examClock = useMemo(() => exam ? getExamClock(exam, now) : null, [exam, now]);
+    const connectedRows = useMemo(() => candidates.filter((candidate) => candidate.connected), [candidates]);
 
     async function refresh() {
         try {
             setRefreshing(true);
             setError(null);
 
-            const examId = exam?.id ?? await resolveActiveExamId();
+            const examId = exam?.id ?? await resolveMonitorExamId();
 
             if (!examId) {
                 setExam(null);
@@ -118,6 +130,12 @@ export function ActiveMonitorPage() {
 
         return () => window.clearInterval(timer);
     }, [exam?.id]);
+
+    useEffect(() => {
+        const timer = window.setInterval(() => setNow(Date.now()), 1000);
+
+        return () => window.clearInterval(timer);
+    }, []);
 
     function showToast(nextToast: { tone: 'success' | 'danger'; message: string }) {
         setToast(nextToast);
@@ -275,8 +293,30 @@ export function ActiveMonitorPage() {
 
             {!loading && !error && exam && summary && (
                 <>
+                    {examClock && (
+                        <Card className={cn(examClock.tone === 'danger' && 'border-danger/30', examClock.tone === 'warning' && 'border-accentOrange/30')}>
+                            <CardContent className="flex flex-col gap-4 pt-5 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className={cn(
+                                        'rounded-md border p-3',
+                                        examClock.tone === 'danger' ? 'border-danger/30 bg-danger/10 text-danger' : examClock.tone === 'warning' ? 'border-accentOrange/30 bg-accentOrange/10 text-accentOrange' : 'border-primary/30 bg-primary/10 text-primary',
+                                    )}>
+                                        <Clock3 className="h-6 w-6" />
+                                    </div>
+                                    <div>
+                                        <div className="text-sm font-semibold uppercase text-slate-500">{examClock.label}</div>
+                                        <div className="mt-1 text-3xl font-bold tabular-nums text-slateDark">{formatDuration(examClock.seconds)}</div>
+                                    </div>
+                                </div>
+                                <div className="text-sm font-semibold text-slate-500">
+                                    {examClock.detail}
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
+
                     <section className="grid gap-4 md:grid-cols-3 xl:grid-cols-7">
-                        <SummaryCard icon={<BookOpen className="h-5 w-5 text-primary" />} label="Subjects" value={summary.subject_count} />
+                        <SummaryCard icon={<BookOpen className="h-5 w-5 text-primary" />} label={pluralizeUnitLabel(exam.unit_label ?? 'Subject')} value={summary.subject_count} />
                         <SummaryCard icon={<Users className="h-5 w-5 text-info" />} label="Total Candidates" value={summary.total_candidates} />
                         <SummaryCard icon={<UserCheck className="h-5 w-5 text-success" />} label="Active" value={summary.active} />
                         <SummaryCard icon={<UserCheck className="h-5 w-5 text-primary" />} label="Submitted" value={submittedTotal} />
@@ -298,6 +338,7 @@ export function ActiveMonitorPage() {
                                             <TableHead>Name</TableHead>
                                             <TableHead>Reg No</TableHead>
                                             <TableHead>Status</TableHead>
+                                            <TableHead>Connection</TableHead>
                                             <TableHead>Questions</TableHead>
                                             <TableHead>Answered</TableHead>
                                             <TableHead>Unanswered</TableHead>
@@ -312,7 +353,7 @@ export function ActiveMonitorPage() {
                                     <tbody>
                                         {rows.length === 0 && (
                                             <tr className="border-t border-border">
-                                                <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={12}>
+                                                <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={13}>
                                                     No candidate sessions are available for this exam yet.
                                                 </td>
                                             </tr>
@@ -322,6 +363,11 @@ export function ActiveMonitorPage() {
                                                 <TableCell className="font-semibold text-slateDark">{candidate.full_name}</TableCell>
                                                 <TableCell>{candidate.registration_number}</TableCell>
                                                 <TableCell><StatusBadge status={candidate.status} /></TableCell>
+                                                <TableCell>
+                                                    <Badge className={candidate.connected ? 'border-success/30 bg-success/10 text-success' : 'border-slate-300 bg-slate-100 text-slate-600'} variant="outline">
+                                                        {candidate.connected ? 'Connected' : 'Offline'}
+                                                    </Badge>
+                                                </TableCell>
                                                 <TableCell>{candidate.total_questions}</TableCell>
                                                 <TableCell>{candidate.answered_count}</TableCell>
                                                 <TableCell>{candidate.unanswered_count}</TableCell>
@@ -355,6 +401,33 @@ export function ActiveMonitorPage() {
                                         ))}
                                     </tbody>
                                 </table>
+                            </CardContent>
+                        </Card>
+
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>Connected Candidate Devices</CardTitle>
+                                <CardDescription>Live sockets currently connected to this center server.</CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                {connectedRows.length === 0 ? (
+                                    <div className="text-sm text-slate-500">No candidate device is connected right now.</div>
+                                ) : (
+                                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                        {connectedRows.map((candidate) => (
+                                            <div key={candidate.socket_id ?? candidate.id} className="rounded-md border border-border bg-lightBackground p-3">
+                                                <div className="font-semibold text-slateDark">{candidate.full_name}</div>
+                                                <div className="mt-1 text-xs font-semibold uppercase text-slate-500">{candidate.registration_number}</div>
+                                                <div className="mt-3 grid gap-1 text-sm text-slate-600">
+                                                    <div>IP: {candidate.ip_address ?? '-'}</div>
+                                                    <div>Device: {shortenDevice(candidate.device_fingerprint)}</div>
+                                                    <div>Connected: {formatDateTime(candidate.connected_at)}</div>
+                                                    <div className="truncate" title={candidate.user_agent ?? undefined}>Agent: {candidate.user_agent ?? '-'}</div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
 
@@ -465,7 +538,7 @@ export function ActiveMonitorPage() {
     }
 }
 
-async function resolveActiveExamId(): Promise<string | null> {
+async function resolveMonitorExamId(): Promise<string | null> {
     const response = await fetch(`${apiBaseUrl}/api/exams`);
 
     if (!response.ok) {
@@ -473,7 +546,72 @@ async function resolveActiveExamId(): Promise<string | null> {
     }
 
     const data = await response.json() as { exams: ExamSummary[] };
-    return data.exams.find((exam) => exam.status === 'active')?.id ?? null;
+    const activeExam = data.exams.find((exam) => exam.status === 'active');
+
+    if (activeExam) {
+        return activeExam.id;
+    }
+
+    const readyExams = data.exams
+        .filter((exam) => exam.status === 'ready')
+        .sort((first, second) => dateValue(first.start_at) - dateValue(second.start_at));
+
+    return readyExams[0]?.id ?? null;
+}
+
+type ExamClock = {
+    label: string;
+    detail: string;
+    seconds: number;
+    tone: 'primary' | 'warning' | 'danger';
+};
+
+function getExamClock(exam: ExamSummary, now: number): ExamClock | null {
+    if (exam.status === 'active') {
+        const startedAt = dateValue(exam.actual_started_at) || now;
+        const endsAt = startedAt + exam.duration_minutes * 60 * 1000;
+        const remainingSeconds = Math.max(0, Math.ceil((endsAt - now) / 1000));
+
+        return {
+            label: remainingSeconds > 0 ? 'Exam Time Remaining' : 'Exam Time Due',
+            detail: remainingSeconds > 0 ? `Started ${formatDateTime(exam.actual_started_at)}` : 'The server is closing this exam and auto-submitting active attempts.',
+            seconds: remainingSeconds,
+            tone: remainingSeconds <= 60 ? 'danger' : remainingSeconds <= 300 ? 'warning' : 'primary',
+        };
+    }
+
+    if (exam.status === 'ready') {
+        const startsAt = dateValue(exam.start_at);
+
+        if (!startsAt) {
+            return {
+                label: 'Exam Ready',
+                detail: 'No scheduled start time was included in the imported package.',
+                seconds: 0,
+                tone: 'primary',
+            };
+        }
+
+        const secondsToStart = Math.max(0, Math.ceil((startsAt - now) / 1000));
+
+        return {
+            label: secondsToStart > 0 ? 'Time Until Exam Starts' : 'Exam Ready To Start',
+            detail: `Scheduled start ${formatDateTime(exam.start_at)}`,
+            seconds: secondsToStart,
+            tone: secondsToStart <= 60 ? 'warning' : 'primary',
+        };
+    }
+
+    return null;
+}
+
+function dateValue(value: string | null): number {
+    if (!value) {
+        return 0;
+    }
+
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function SummaryCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
@@ -488,6 +626,16 @@ function SummaryCard({ icon, label, value }: { icon: React.ReactNode; label: str
             </CardContent>
         </Card>
     );
+}
+
+function pluralizeUnitLabel(label: string): string {
+    const cleanLabel = label.trim() || 'Subject';
+
+    if (cleanLabel.endsWith('y')) {
+        return `${cleanLabel.slice(0, -1)}ies`;
+    }
+
+    return cleanLabel.endsWith('s') ? cleanLabel : `${cleanLabel}s`;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -542,6 +690,26 @@ function formatDateTime(value: string | null): string {
         dateStyle: 'medium',
         timeStyle: 'short',
     }).format(new Date(value));
+}
+
+function formatDuration(totalSeconds: number): string {
+    const seconds = Math.max(0, Math.floor(totalSeconds));
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainingSeconds = seconds % 60;
+    const parts = hours > 0
+        ? [hours, minutes, remainingSeconds]
+        : [minutes, remainingSeconds];
+
+    return parts.map((part) => String(part).padStart(2, '0')).join(':');
+}
+
+function shortenDevice(value: string | null): string {
+    if (!value) {
+        return '-';
+    }
+
+    return value.length > 18 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value;
 }
 
 function describeEvent(type: string, payload: unknown): string {

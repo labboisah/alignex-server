@@ -3,7 +3,8 @@ $ErrorActionPreference = 'Stop'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $repoRoot = Resolve-Path (Join-Path $root '..')
 $electronDist = Join-Path $root 'node_modules\electron\dist'
-$outputRoot = Join-Path $repoRoot 'public\downloads\offline-server'
+$releaseVersion = (Get-Content -LiteralPath (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version
+$outputRoot = Join-Path $root ('releases\' + $releaseVersion)
 $appFolder = Join-Path $outputRoot 'AlignEx-Center-Server-win-unpacked'
 $zipPath = Join-Path $outputRoot 'AlignEx-Center-Server-win-unpacked.zip'
 $resourcesFolder = Join-Path $appFolder 'resources'
@@ -50,6 +51,14 @@ if (-not $rcedit) {
     throw 'Windows resource editor was not found. Run npm install inside offline-candidate-browser so rcedit is available.'
 }
 
+$resolvedOutput = [System.IO.Path]::GetFullPath($outputRoot).TrimEnd('\')
+$allowedReleaseRoot = [System.IO.Path]::GetFullPath((Join-Path $root 'releases')).TrimEnd('\') + '\'
+if (-not $resolvedOutput.StartsWith($allowedReleaseRoot, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Release output must stay within the server releases directory.' }
+foreach ($targetPath in @($appFolder, $appStage, $zipPath)) {
+    $resolvedTarget = [System.IO.Path]::GetFullPath($targetPath)
+    if (-not $resolvedTarget.StartsWith($resolvedOutput + '\', [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Packaging target escaped the release directory.' }
+    if ((Test-Path -LiteralPath $targetPath) -and ((Get-Item -LiteralPath $targetPath -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { throw 'Packaging refuses linked targets.' }
+}
 New-Item -ItemType Directory -Force $outputRoot | Out-Null
 
 if (Test-Path $appFolder) {
@@ -68,7 +77,7 @@ Copy-Item -LiteralPath $electronDist -Destination $appFolder -Recurse
 Rename-Item -LiteralPath (Join-Path $appFolder 'electron.exe') -NewName 'AlignEx Center Server.exe'
 $serverExe = Join-Path $appFolder 'AlignEx Center Server.exe'
 
-& $rcedit $serverExe --set-icon $iconPath
+& $rcedit $serverExe --set-icon $iconPath --set-file-version $releaseVersion --set-product-version $releaseVersion
 
 if ($LASTEXITCODE -ne 0) {
     throw 'Failed to apply the AlignEx icon to the center server executable.'
@@ -87,7 +96,8 @@ New-Item -ItemType Directory -Force $appStage | Out-Null
 Copy-Item -LiteralPath $distFolder -Destination (Join-Path $appStage 'dist') -Recurse
 Copy-Item -LiteralPath (Join-Path $root 'package.json') -Destination (Join-Path $appStage 'package.json')
 Copy-Item -LiteralPath (Join-Path $root '.env.example') -Destination (Join-Path $appStage '.env.example')
-Copy-Item -LiteralPath (Join-Path $root 'node_modules') -Destination (Join-Path $appStage 'node_modules') -Recurse
+& node (Join-Path $PSScriptRoot 'stage-runtime.cjs') $root $appStage
+if ($LASTEXITCODE -ne 0) { throw 'Runtime dependency staging failed.' }
 
 & $asarCli pack $appStage $appAsar --unpack "*.node"
 

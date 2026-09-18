@@ -1,9 +1,12 @@
+import { initializeResultUploads, resultUploadStatus, uploadExamResults } from './result-upload-service.js';
 import express from 'express';
+import { createRequire } from 'node:module';
+const { installPilot } = createRequire(import.meta.url)('./adaptive-pilot.cjs');
 import { createServer, type Server as HttpServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Server as SocketServer } from 'socket.io';
-import { activateOffline, activateOnline, ActivationError, getActivationStatus, getLocalSyncConfig, loginLocalAdmin } from './activation-service.js';
+import { activateOffline, activateOnline, ActivationError, deactivateLocal, getActivationStatus, getLocalSyncConfig, loginLocalAdmin } from './activation-service.js';
 import { CandidateAnswerError, saveCandidateAnswer } from './candidate-answer-service.js';
 import { CandidateExamError, getAttemptTokenFromHeader, getCandidateExam } from './candidate-exam-service.js';
 import { CandidateLoginError, loginCandidate } from './candidate-login-service.js';
@@ -12,7 +15,7 @@ import { createDatabase, type CenterDatabase } from './database.js';
 import { closeExam, ExamControlError, startExam } from './exam-control-service.js';
 import { getExamSummary, listExamCandidates, listExamSummaries, verifyExamPapers } from './exam-queries.js';
 import { DuplicatePackageError, ImportCodeError, importExamPackageByCode, PackageValidationError } from './exam-import-service.js';
-import { getCandidateSocketIdentity, getMonitorSummary, listMonitorCandidates, resetCandidateDevice } from './monitor-service.js';
+import { getCandidateSocketIdentityFromPayload, getMonitorSummary, listMonitorCandidates, resetCandidateDevice, type ConnectedCandidateSnapshot } from './monitor-service.js';
 import { assertPlanFeature, PlanFeatureError } from './plan-features.js';
 import { exportExamResults, ResultExportError } from './result-export-service.js';
 import { StatusService } from './status-service.js';
@@ -56,17 +59,45 @@ export async function startCenterServer(options: StartCenterServerOptions): Prom
         port: options.port,
         startedAt: new Date().toISOString(),
     });
-    const connectedCandidates = new Map<string, { candidate_id: string; exam_id: string; attempt_id: string }>();
+    const connectedClientSockets = new Map<string, { connected_at: string; user_agent: string | null }>();
+    const connectedCandidateSockets = new Map<string, ConnectedCandidateSnapshot>();
+    const autoClosingExamIds = new Set<string>();
 
     statusService.attachSocketServer(socketServer);
+    statusService.setConnectedCandidateCountProvider(() => connectedClientSockets.size);
 
     app.use((_request, response, next) => {
         response.setHeader('Access-Control-Allow-Origin', '*');
         response.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
-        response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-AlignEx-Admin-Email, X-AlignEx-Admin-Password');
+        response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-AlignEx-Admin-Email, X-AlignEx-Admin-Password, X-AlignEx-Device-Id');
         next();
     });
     app.use(express.json({ limit: '15mb' }));
+    const pilot = installPilot({
+        connection: database.connection,
+        getConfig: () => getLocalSyncConfig(database.connection, database.path),
+        authenticateAdmin: (email: string, password: string) => loginLocalAdmin(database.connection, email, password),
+    });
+    app.use('/api/adaptive-pilot', pilot.router);
+    initializeResultUploads(database.connection);
+    const authenticateResultAdmin = (request: express.Request, response: express.Response, next: express.NextFunction) => {
+        try {
+            const email = String(request.header('X-AlignEx-Admin-Email') ?? '');
+            const password = String(request.header('X-AlignEx-Admin-Password') ?? '');
+            const active = database.connection.prepare("SELECT 1 FROM local_users WHERE email = ? AND status = 'active' AND role = 'admin'").get(email.trim());
+            if (!active) { response.status(401).json({ message: 'Active local administrator credentials are required.' }); return; }
+            loginLocalAdmin(database.connection, email, password);
+            next();
+        } catch { response.status(401).json({ message: 'Local administrator credentials are invalid.' }); }
+    };
+    app.get('/api/results/uploads/:examId', authenticateResultAdmin, (request, response) => {
+        response.json({ uploads: resultUploadStatus(database.connection, String(request.params.examId)) });
+    });
+    app.post('/api/results/upload', authenticateResultAdmin, async (request, response) => {
+        try {
+            response.json({ uploads: await uploadExamResults(database.connection, database.path, String(request.body.exam_id ?? '')) });
+        } catch (error) { response.status(409).json({ message: error instanceof Error ? error.message : 'Unable to upload results.' }); }
+    });
 
     app.get('/api/health', (_request, response) => {
         response.json(statusService.getStatus());
@@ -194,6 +225,20 @@ export async function startCenterServer(options: StartCenterServerOptions): Prom
         }
     });
 
+    app.post('/api/app/deactivate', async (request, response) => {
+        try {
+            const status = await deactivateLocal(database.connection, database.path, String(request.body.password ?? ''));
+            response.json({ success: true, status });
+        } catch (error) {
+            if (error instanceof ActivationError) {
+                response.status(error.statusCode).json({ message: error.message });
+                return;
+            }
+
+            response.status(500).json({ message: error instanceof Error ? error.message : 'Deactivation failed.' });
+        }
+    });
+
     app.use(['/api/exams', '/api/monitor', '/api/results', '/api/candidate'], (_request, response, next) => {
         const activation = getActivationStatus(database.connection, database.path);
 
@@ -254,6 +299,8 @@ export async function startCenterServer(options: StartCenterServerOptions): Prom
     });
 
     app.get('/api/monitor/exams/:examId', (request, response) => {
+        const connectedCandidates = getConnectedCandidateSnapshot(connectedCandidateSockets);
+
         response.json({
             summary: getMonitorSummary(database.connection, request.params.examId, new Set(connectedCandidates.keys())),
         });
@@ -261,7 +308,7 @@ export async function startCenterServer(options: StartCenterServerOptions): Prom
 
     app.get('/api/monitor/exams/:examId/candidates', (request, response) => {
         response.json({
-            candidates: listMonitorCandidates(database.connection, request.params.examId),
+            candidates: listMonitorCandidates(database.connection, request.params.examId, getConnectedCandidateSnapshot(connectedCandidateSockets)),
         });
     });
 
@@ -296,21 +343,7 @@ export async function startCenterServer(options: StartCenterServerOptions): Prom
     app.post('/api/exams/:examId/close', (request, response) => {
         try {
             const result = closeExam(database.connection, request.params.examId);
-
-            for (const submittedAttempt of result.auto_submitted_attempts) {
-                socketServer.emit('candidate_submitted', {
-                    exam_id: submittedAttempt.exam_id,
-                    candidate_id: submittedAttempt.candidate_id,
-                    attempt_id: submittedAttempt.attempt_id,
-                    status: submittedAttempt.status,
-                    answered_count: submittedAttempt.answered_count,
-                    total_questions: submittedAttempt.total_questions,
-                    submitted_at: submittedAttempt.submitted_at,
-                });
-            }
-
-            socketServer.emit('exam_closed', { exam: result.exam });
-            socketServer.emit('server:status', statusService.getStatus());
+            emitExamClosed(socketServer, statusService, result);
             response.json({
                 exam: result.exam,
                 auto_submitted_count: result.auto_submitted_attempts.length,
@@ -331,6 +364,7 @@ export async function startCenterServer(options: StartCenterServerOptions): Prom
             const runtimeConfig = getLocalSyncConfig(database.connection, database.path);
             const summary = await importExamPackageByCode(database.connection, String(request.body.import_code ?? ''), String(request.body.exam_code ?? ''), {
                 centerId: runtimeConfig.center_id ?? options.centerId ?? null,
+                deviceId: runtimeConfig.device_id ?? null,
                 syncBaseUrl: runtimeConfig.portal_url ?? options.syncBaseUrl ?? null,
                 syncToken: runtimeConfig.sync_token ?? options.syncToken ?? null,
                 syncAdminEmail: runtimeConfig.admin_email ?? options.syncAdminEmail ?? null,
@@ -541,29 +575,85 @@ export async function startCenterServer(options: StartCenterServerOptions): Prom
         response.sendFile(join(rendererDistPath, 'candidate.html'));
     });
 
+    const autoCloseTimer = setInterval(() => {
+        pilot.expire();
+        closeDueActiveExams(database.connection, socketServer, statusService, autoClosingExamIds);
+    }, 1000);
+
     socketServer.on('connection', (socket) => {
+        const registerClientSocket = () => {
+            if (!connectedClientSockets.has(socket.id)) {
+                connectedClientSockets.set(socket.id, {
+                    connected_at: new Date().toISOString(),
+                    user_agent: typeof socket.handshake.headers['user-agent'] === 'string' ? socket.handshake.headers['user-agent'] : null,
+                });
+            }
+
+            socketServer.emit('server:status', statusService.getStatus());
+        };
+
+        if (socket.handshake.auth?.client_type === 'candidate_client') {
+            registerClientSocket();
+        }
+
         socket.emit('server:status', statusService.getStatus());
         socket.broadcast.emit('server:status', statusService.getStatus());
 
-        socket.on('candidate:join', (payload?: { attempt_token?: unknown }) => {
-            const attemptToken = typeof payload?.attempt_token === 'string' ? payload.attempt_token : '';
-            const identity = getCandidateSocketIdentity(database.connection, attemptToken);
+        const registerCandidateSocket = (payload?: { attempt_token?: unknown; candidate_id?: unknown; exam_id?: unknown }) => {
+            const identity = getCandidateSocketIdentityFromPayload(database.connection, {
+                attempt_token: payload?.attempt_token,
+                candidate_id: payload?.candidate_id,
+                exam_id: payload?.exam_id,
+            });
 
             if (!identity) {
                 return;
             }
 
-            socket.data.candidateIdentity = identity;
-            connectedCandidates.set(identity.candidate_id, identity);
+            const existingConnection = connectedCandidateSockets.get(socket.id);
+            const connectedCandidate: ConnectedCandidateSnapshot = {
+                ...identity,
+                connected_at: existingConnection?.connected_at ?? new Date().toISOString(),
+                socket_id: socket.id,
+                user_agent: typeof socket.handshake.headers['user-agent'] === 'string' ? socket.handshake.headers['user-agent'] : null,
+            };
+
+            socket.data.candidateIdentity = connectedCandidate;
+            connectedCandidateSockets.set(socket.id, connectedCandidate);
             socket.join(`exam:${identity.exam_id}`);
-            socketServer.emit('candidate_reconnected', identity);
-        });
+
+            if (!existingConnection) {
+                socketServer.emit('candidate_reconnected', connectedCandidate);
+            }
+
+            socketServer.emit('server:status', statusService.getStatus());
+        };
+
+        const authAttemptToken = typeof socket.handshake.auth?.attempt_token === 'string'
+            ? socket.handshake.auth.attempt_token
+            : typeof socket.handshake.auth?.token === 'string'
+                ? socket.handshake.auth.token
+                : '';
+
+        if (authAttemptToken) {
+            registerCandidateSocket({
+                attempt_token: authAttemptToken,
+                candidate_id: typeof socket.handshake.auth?.candidate_id === 'string' ? socket.handshake.auth.candidate_id : undefined,
+                exam_id: typeof socket.handshake.auth?.exam_id === 'string' ? socket.handshake.auth.exam_id : undefined,
+            });
+        }
+
+        socket.on('candidate:join', registerCandidateSocket);
+        socket.on('client_connected', registerClientSocket);
+        socket.on('candidate_online', registerCandidateSocket);
+        socket.on('heartbeat', registerCandidateSocket);
 
         socket.on('disconnect', () => {
-            const identity = socket.data.candidateIdentity as { candidate_id: string; exam_id: string; attempt_id: string } | undefined;
+            const identity = socket.data.candidateIdentity as ConnectedCandidateSnapshot | undefined;
+            connectedClientSockets.delete(socket.id);
 
             if (identity) {
-                connectedCandidates.delete(identity.candidate_id);
+                connectedCandidateSockets.delete(socket.id);
                 socketServer.emit('candidate_disconnected', identity);
             }
 
@@ -582,8 +672,73 @@ export async function startCenterServer(options: StartCenterServerOptions): Prom
         database,
         statusService,
         url: `http://127.0.0.1:${options.port}`,
-        stop: () => stopCenterServer(httpServer, socketServer, database),
+        stop: () => stopCenterServer(httpServer, socketServer, database, autoCloseTimer),
     };
+}
+
+function getConnectedCandidateSnapshot(connectedCandidateSockets: Map<string, ConnectedCandidateSnapshot>): Map<string, ConnectedCandidateSnapshot> {
+    const candidates = new Map<string, ConnectedCandidateSnapshot>();
+
+    for (const candidate of connectedCandidateSockets.values()) {
+        const existing = candidates.get(candidate.candidate_id);
+
+        if (!existing || existing.connected_at < candidate.connected_at) {
+            candidates.set(candidate.candidate_id, candidate);
+        }
+    }
+
+    return candidates;
+}
+
+function closeDueActiveExams(connection: CenterDatabase['connection'], socketServer: SocketServer, statusService: StatusService, autoClosingExamIds: Set<string>): void {
+    const activeExams = connection.prepare(`
+        SELECT id, actual_started_at, duration_minutes
+        FROM imported_exams
+        WHERE status = 'active'
+          AND actual_started_at IS NOT NULL
+    `).all() as Array<{ id: string; actual_started_at: string | null; duration_minutes: number }>;
+    const now = Date.now();
+
+    for (const exam of activeExams) {
+        const startedAt = exam.actual_started_at ? new Date(exam.actual_started_at).getTime() : Number.NaN;
+        const dueAt = startedAt + Number(exam.duration_minutes) * 60 * 1000;
+
+        if (!Number.isFinite(dueAt) || dueAt > now) {
+            continue;
+        }
+
+        if (autoClosingExamIds.has(exam.id)) {
+            continue;
+        }
+
+        autoClosingExamIds.add(exam.id);
+
+        try {
+            const result = closeExam(connection, exam.id);
+            emitExamClosed(socketServer, statusService, result);
+        } catch {
+            // The manual close endpoint reports detailed errors; this background guard stays quiet.
+        } finally {
+            autoClosingExamIds.delete(exam.id);
+        }
+    }
+}
+
+function emitExamClosed(socketServer: SocketServer, statusService: StatusService, result: ReturnType<typeof closeExam>): void {
+    for (const submittedAttempt of result.auto_submitted_attempts) {
+        socketServer.emit('candidate_submitted', {
+            exam_id: submittedAttempt.exam_id,
+            candidate_id: submittedAttempt.candidate_id,
+            attempt_id: submittedAttempt.attempt_id,
+            status: submittedAttempt.status,
+            answered_count: submittedAttempt.answered_count,
+            total_questions: submittedAttempt.total_questions,
+            submitted_at: submittedAttempt.submitted_at,
+        });
+    }
+
+    socketServer.emit('exam_closed', { exam: result.exam });
+    socketServer.emit('server:status', statusService.getStatus());
 }
 
 function getRequestIpAddress(request: express.Request): string {
@@ -596,7 +751,11 @@ function getRequestIpAddress(request: express.Request): string {
     return request.socket.remoteAddress ?? 'unknown';
 }
 
-async function stopCenterServer(httpServer: HttpServer, socketServer: SocketServer, database: CenterDatabase): Promise<void> {
+async function stopCenterServer(httpServer: HttpServer, socketServer: SocketServer, database: CenterDatabase, autoCloseTimer?: ReturnType<typeof setInterval>): Promise<void> {
+    if (autoCloseTimer) {
+        clearInterval(autoCloseTimer);
+    }
+
     await new Promise<void>((resolve) => {
         socketServer.close(() => resolve());
     });

@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, Loader2, MonitorCheck, Play } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { loadSocketIo } from '../renderer/lib/socket';
 import { ExamScreen, type SubmissionSummary } from './ExamScreen';
 
 type CandidateLoginResponse = {
@@ -8,6 +9,7 @@ type CandidateLoginResponse = {
         id: string;
         registration_number: string;
         full_name: string;
+        photo_url: string | null;
         group_name: string | null;
     };
     exam: {
@@ -15,6 +17,9 @@ type CandidateLoginResponse = {
         exam_code: string;
         title: string;
         organization_name: string;
+        institution_name: string | null;
+        institution_type: string;
+        unit_label: string;
         duration_minutes: number;
         total_questions: number;
         started_at: string | null;
@@ -25,6 +30,18 @@ type CandidateLoginResponse = {
 export type CandidateExamPayload = {
     candidate: CandidateLoginResponse['candidate'];
     exam: CandidateLoginResponse['exam'];
+    subjects?: Array<{
+        id: string;
+        name: string;
+        code: string | null;
+        unit_type: string;
+    }>;
+    units?: Array<{
+        id: string;
+        name: string;
+        code: string | null;
+        unit_type: string;
+    }>;
     questions: Array<{
         id: string;
         subject_id: string | null;
@@ -92,6 +109,53 @@ export function CandidateApp() {
         };
     }, []);
 
+    useEffect(() => {
+        if (session) {
+            return;
+        }
+
+        let socket: {
+            emit: (event: string, payload?: unknown) => void;
+            on: (event: string, callback: () => void) => void;
+            disconnect: () => void;
+            removeAllListeners: () => void;
+        } | null = null;
+        let cancelled = false;
+
+        async function connectPresenceSocket() {
+            try {
+                const io = await loadSocketIo();
+
+                if (cancelled) {
+                    return;
+                }
+
+                socket = io(window.location.origin, {
+                    auth: {
+                        client_type: 'candidate_client',
+                    },
+                    transports: ['websocket', 'polling'],
+                });
+                socket.on('connect', () => {
+                    socket?.emit('client_connected', {
+                        client_type: 'candidate_client',
+                        timestamp: new Date().toISOString(),
+                    });
+                });
+            } catch {
+                // Login can still proceed over HTTP if the live presence socket is unavailable.
+            }
+        }
+
+        void connectPresenceSocket();
+
+        return () => {
+            cancelled = true;
+            socket?.removeAllListeners();
+            socket?.disconnect();
+        };
+    }, [session]);
+
     async function login() {
         try {
             setLoading(true);
@@ -151,6 +215,7 @@ export function CandidateApp() {
                     <img src="./images/logo.png" alt="AlignEx" className="mx-auto h-16 w-16 object-contain" />
                     <div className="mt-3 text-lg font-semibold text-primary">AlignEx Center Server</div>
                     <h1 className="mt-3 text-4xl font-bold tracking-normal text-slateDark">Candidate Login</h1>
+                    <a className="mt-3 inline-block text-primary underline" href="/adaptive.html">Adaptive diagnostic pilot</a>
                     <p className="mt-3 text-lg text-slate-500">Enter your exam code and registration number to begin.</p>
                 </div>
 

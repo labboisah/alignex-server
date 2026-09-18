@@ -73,14 +73,14 @@ export function SettingsPage() {
                             <UpdateCard
                                 artifact="server"
                                 busy={updateBusy === 'server'}
-                                currentVersion={updateState?.current_versions.server ?? '0.1.0'}
+                                currentVersion={updateState?.current_versions.server ?? '0.1.4'}
                                 update={updateState?.updates.server ?? null}
                                 onDownload={() => void downloadArtifact('server')}
                             />
                             <UpdateCard
                                 artifact="client_app"
                                 busy={updateBusy === 'client_app'}
-                                currentVersion={updateState?.current_versions.client_app ?? '0.1.0'}
+                                currentVersion={updateState?.current_versions.client_app ?? '0.1.3'}
                                 update={updateState?.updates.client_app ?? null}
                                 onDownload={() => void downloadArtifact('client_app')}
                             />

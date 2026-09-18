@@ -3,12 +3,14 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
+export const DEFAULT_STORAGE_PATH = './data/offline.sqlite';
 
 export type OfflineServerConfig = {
     name: string;
     port: number;
     centerId: string | null;
     storagePath: string;
+    usesDefaultStoragePath: boolean;
     packagePublicKeyPath: string;
     syncBaseUrl: string | null;
     syncToken: string | null;
@@ -18,12 +20,14 @@ export type OfflineServerConfig = {
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): OfflineServerConfig {
     const configEnv = env === process.env ? { ...readDotEnvFile(), ...env } : env;
+    const configuredStoragePath = valueOrNull(configEnv.OFFLINE_STORAGE_PATH);
 
     return {
         name: configEnv.OFFLINE_SERVER_NAME ?? 'AlignEx Offline Center',
         port: Number(configEnv.OFFLINE_SERVER_PORT ?? 4080),
         centerId: valueOrNull(configEnv.OFFLINE_CENTER_ID),
-        storagePath: configEnv.OFFLINE_STORAGE_PATH ?? './data/offline.sqlite',
+        storagePath: configuredStoragePath ?? DEFAULT_STORAGE_PATH,
+        usesDefaultStoragePath: !configuredStoragePath,
         packagePublicKeyPath: configEnv.OFFLINE_PACKAGE_PUBLIC_KEY_PATH ?? './keys/alignex-package-public.pem',
         syncBaseUrl: valueOrNull(configEnv.ALIGNEX_SYNC_BASE_URL),
         syncToken: valueOrNull(configEnv.ALIGNEX_SYNC_TOKEN),

@@ -121,7 +121,7 @@ export function exportExamResults(
         throw new ResultExportError('Exam not found.', 'exam_not_found', 404);
     }
 
-    if (exam.status !== 'closed') {
+    if (!['closed', 'exported'].includes(exam.status)) {
         throw new ResultExportError('Only closed exams can be exported.', 'exam_not_closed', 409);
     }
 

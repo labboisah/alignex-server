@@ -46,7 +46,7 @@ export class UpdateError extends Error {
 
 const currentVersions: Record<UpdateArtifact, string> = {
     server: readPackageVersion('offline-server'),
-    client_app: '0.1.0',
+    client_app: '0.1.3',
 };
 
 export async function checkForUpdates(connection: SqliteDatabase, databasePath: string): Promise<UpdateCheckResult> {
@@ -58,7 +58,7 @@ export async function checkForUpdates(connection: SqliteDatabase, databasePath: 
     }
 
     const response = await fetch(`${portalUrl}/api/offline/updates`, {
-        headers: syncHeaders(config.admin_email, config.admin_password),
+        headers: syncHeaders(config.admin_email, config.admin_password, config.sync_token, config.device_id),
     });
     const data = (await response.json().catch(() => ({}))) as { updates?: Partial<Record<UpdateArtifact, PortalUpdateArtifact | null>>; message?: string };
 
@@ -90,7 +90,7 @@ export async function downloadUpdate(connection: SqliteDatabase, databasePath: s
     }
 
     const response = await fetch(metadata.download_url, {
-        headers: syncHeaders(config.admin_email, config.admin_password),
+        headers: syncHeaders(config.admin_email, config.admin_password, config.sync_token, config.device_id),
     });
 
     if (!response.ok) {
@@ -135,12 +135,22 @@ export async function downloadUpdate(connection: SqliteDatabase, databasePath: s
     };
 }
 
-function syncHeaders(adminEmail: string, adminPassword: string): Record<string, string> {
-    return {
+function syncHeaders(adminEmail: string, adminPassword: string, syncToken: string | null, deviceId: string | null): Record<string, string> {
+    const headers: Record<string, string> = {
         Accept: 'application/json',
         'X-AlignEx-Admin-Email': adminEmail,
         'X-AlignEx-Admin-Password': adminPassword,
     };
+
+    if (syncToken) {
+        headers.Authorization = `Bearer ${syncToken}`;
+    }
+
+    if (deviceId) {
+        headers['X-AlignEx-Device-Id'] = deviceId;
+    }
+
+    return headers;
 }
 
 function withAvailability(metadata: PortalUpdateArtifact | null, currentVersion: string): (PortalUpdateArtifact & { update_available: boolean }) | null {
@@ -183,8 +193,8 @@ function normalizePortalUrl(value: string | null): string {
 function readPackageVersion(packageName: 'offline-server'): string {
     try {
         const packageJson = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json'), 'utf8')) as { version?: unknown };
-        return typeof packageJson.version === 'string' ? packageJson.version : '0.1.0';
+        return typeof packageJson.version === 'string' ? packageJson.version : '0.1.3';
     } catch {
-        return packageName === 'offline-server' ? '0.1.0' : '0.1.0';
+        return '0.1.3';
     }
 }

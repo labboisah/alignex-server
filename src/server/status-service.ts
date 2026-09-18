@@ -15,6 +15,7 @@ export class StatusService {
     private readonly port: number;
     private readonly startedAt: string;
     private socketServer: SocketServer | null = null;
+    private connectedCandidateCountProvider: (() => number) | null = null;
 
     constructor(options: StatusServiceOptions) {
         this.database = options.database;
@@ -26,15 +27,23 @@ export class StatusService {
         this.socketServer = socketServer;
     }
 
+    setConnectedCandidateCountProvider(provider: () => number): void {
+        this.connectedCandidateCountProvider = provider;
+    }
+
     getStatus(): CenterServerStatus {
         const localIpAddress = detectLanIpAddress();
+        const owner = this.getOrganizationIdentity();
 
         return {
             serverStatus: 'online',
             localIpAddress,
             candidateUrl: `http://${localIpAddress}:${this.port}/`,
             port: this.port,
-            connectedCandidates: this.socketServer?.engine.clientsCount ?? 0,
+            organizationDisplayName: owner.displayName,
+            organizationName: owner.organizationName,
+            centerName: owner.centerName,
+            connectedCandidates: this.connectedCandidateCountProvider?.() ?? 0,
             importedExams: this.countImportedExams(),
             activeCandidates: this.countAttemptsByStatus(['active']),
             submittedCandidates: this.countAttemptsByStatus(['submitted', 'auto_submitted']),
@@ -86,5 +95,35 @@ export class StatusService {
             .get(...statuses) as { count: number };
 
         return row.count;
+    }
+
+    private getOrganizationIdentity(): { displayName: string | null; organizationName: string | null; centerName: string | null } {
+        const activation = this.database.connection.prepare(`
+            SELECT organization_name, center_name
+            FROM license_activations
+            ORDER BY activated_at DESC, created_at DESC
+            LIMIT 1
+        `).get() as { organization_name: string | null; center_name: string | null } | undefined;
+
+        if (activation) {
+            return {
+                displayName: activation.center_name || activation.organization_name || null,
+                organizationName: activation.organization_name,
+                centerName: activation.center_name,
+            };
+        }
+
+        const exam = this.database.connection.prepare(`
+            SELECT organization_name, institution_name
+            FROM imported_exams
+            ORDER BY imported_at DESC, created_at DESC
+            LIMIT 1
+        `).get() as { organization_name: string | null; institution_name: string | null } | undefined;
+
+        return {
+            displayName: exam?.institution_name || exam?.organization_name || null,
+            organizationName: exam?.organization_name ?? null,
+            centerName: exam?.institution_name ?? null,
+        };
     }
 }

@@ -5,6 +5,8 @@ import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { cn } from '@/lib/utils';
 
+type UploadRow = { attempt_id: string; candidate_no: string; status: string; error: string | null; receipt: { visibility: string; official_score: number | null; score_difference: number | null; result_url: string } | null };
+
 type ExamStatus = 'ready' | 'active' | 'closed' | 'exported';
 
 type ImportedExamSummary = {
@@ -52,7 +54,32 @@ export function ResultsExportPage() {
     const [summary, setSummary] = useState<ExportSummary | null>(null);
     const [toast, setToast] = useState<ToastState | null>(null);
 
-    const closedExams = useMemo(() => exams.filter((exam) => exam.status === 'closed'), [exams]);
+
+    const [adminEmail, setAdminEmail] = useState('');
+    const [adminPassword, setAdminPassword] = useState('');
+    const [uploading, setUploading] = useState<string | null>(null);
+    const [uploads, setUploads] = useState<Record<string, UploadRow[]>>({});
+    const [uploadError, setUploadError] = useState<string | null>(null);
+
+    async function uploadResults(exam: ImportedExamSummary, statusOnly = false) {
+        setUploading(exam.id);
+        setUploadError(null);
+        try {
+            const response = await fetch(statusOnly ? `${apiBaseUrl}/api/results/uploads/${encodeURIComponent(exam.id)}` : `${apiBaseUrl}/api/results/upload`, {
+                method: statusOnly ? 'GET' : 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-AlignEx-Admin-Email': adminEmail, 'X-AlignEx-Admin-Password': adminPassword },
+                ...(statusOnly ? {} : { body: JSON.stringify({ exam_id: exam.id }) }),
+            });
+            const data = await response.json() as {uploads?: UploadRow[]; message?: string};
+            if (!response.ok || !data.uploads) throw new Error(data.message ?? 'Could not upload results.');
+            setUploads(current => ({ ...current, [exam.id]: data.uploads! }));
+            const failed = data.uploads.filter(row => row.status !== 'accepted').length;
+            if (!statusOnly) showToast({ tone: failed ? 'danger' : 'success', message: failed ? `${failed} results need attention. Review the errors and retry.` : `${data.uploads.length} results acknowledged by the portal.` });
+        } catch (error) { setUploadError(error instanceof Error ? error.message : 'Upload failed.'); }
+        finally { setUploading(null); }
+    }
+
+    const closedExams = useMemo(() => exams.filter((exam) => ['closed', 'exported'].includes(exam.status)), [exams]);
 
     function showToast(nextToast: ToastState) {
         setToast(nextToast);
@@ -153,7 +180,7 @@ export function ResultsExportPage() {
             <div className="flex items-start justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-semibold text-slateDark">Results Export</h1>
-                    <p className="mt-1 text-sm text-slate-500">Export closed exam results as signed local JSON and CSV files.</p>
+                    <p className="mt-1 text-sm text-slate-500">Export closed exam results as local JSON with a checksum and CSV files.</p>
                 </div>
                 <Button disabled={refreshing} onClick={() => void refresh()} variant="outline">
                     {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
@@ -161,11 +188,40 @@ export function ResultsExportPage() {
                 </Button>
             </div>
 
+
+            <Card>
+                <CardHeader><CardTitle>Upload results to portal</CardTitle><CardDescription>Connect to the internet, enter your local administrator login, then upload or retry a closed exam. Candidates can check acknowledged results on the portal after release. Credentials are kept only on this page.</CardDescription></CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="flex flex-wrap gap-3">
+                        <label className="text-sm">Admin email<input className="ml-2 rounded border p-2" type="email" autoComplete="username" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} /></label>
+                        <label className="text-sm">Password<input className="ml-2 rounded border p-2" type="password" autoComplete="current-password" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} /></label>
+                    </div>
+                    {uploadError && <p role="alert" className="text-danger">{uploadError}</p>}
+                    {closedExams.map(exam => (
+                        <div key={exam.id} className="space-y-3 rounded border p-3">
+                            <div className="flex flex-wrap items-center gap-3">
+                                <strong>{exam.title} ({exam.exam_code})</strong>
+                                <Button disabled={!!uploading || !adminEmail || !adminPassword} onClick={() => void uploadResults(exam)}>{uploading === exam.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}Upload / retry</Button>
+                                <Button variant="outline" disabled={!!uploading || !adminEmail || !adminPassword} onClick={() => void uploadResults(exam, true)}>Check saved receipts</Button>
+                            </div>
+                            {uploads[exam.id]?.length === 0 && <p className="text-sm text-slate-500">No uploaded attempts yet. Only submitted, auto-submitted or disqualified attempts can be uploaded.</p>}
+                            {uploads[exam.id]?.map(row => <div key={row.attempt_id} className="border-t pt-2 text-sm">
+                                <strong>{row.candidate_no}</strong>: {row.status === 'accepted' ? `Uploaded ? ${row.receipt?.visibility} at acknowledgement` : row.status}
+                                {row.receipt && <span> | Official score: {row.receipt.official_score ?? 'N/A'} | Score difference: {row.receipt.score_difference ?? 'N/A'}</span>}
+                                {row.receipt?.result_url && <a className="ml-3 text-primary underline" href={row.receipt.result_url} target="_blank" rel="noreferrer">Candidate result checker</a>}
+                                {row.error && <p className="text-danger">{row.error}</p>}
+                            </div>)}
+                        </div>
+                    ))}
+                    {!loading && closedExams.length === 0 && <p className="text-sm text-slate-500">Close an exam to upload its completed attempts.</p>}
+                </CardContent>
+            </Card>
+
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
                 <Card>
                     <CardHeader>
-                        <CardTitle>Closed Exams Ready for Export</CardTitle>
-                        <CardDescription>Only exams with Closed status can be exported.</CardDescription>
+                        <CardTitle>Closed Exam Results</CardTitle>
+                        <CardDescription>Closed and previously exported exams remain available for upload and backup.</CardDescription>
                     </CardHeader>
                     <CardContent className="p-0">
                         {loading && <StateRow icon={<Loader2 className="h-5 w-5 animate-spin text-info" />} text="Loading closed exams." />}
@@ -196,7 +252,7 @@ export function ResultsExportPage() {
                                                 <TableCell>{exam.organization_name}</TableCell>
                                                 <TableCell>{exam.candidate_count}</TableCell>
                                                 <TableCell>{exam.submitted_candidates}</TableCell>
-                                                <TableCell><Badge className="border-accentOrange/30 bg-accentOrange/10 text-accentOrange" variant="outline">Closed</Badge></TableCell>
+                                                <TableCell><Badge className="border-accentOrange/30 bg-accentOrange/10 text-accentOrange" variant="outline">{exam.status}</Badge></TableCell>
                                                 <TableCell>
                                                     <Button
                                                         disabled={exportingExamId !== null}

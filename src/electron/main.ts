@@ -1,7 +1,7 @@
 import type { BrowserWindow as BrowserWindowType } from 'electron';
-import { existsSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../services/config.js';
 import { startCenterServer, type CenterServer } from '../server/app.js';
@@ -20,9 +20,11 @@ if (process.platform === 'win32') {
 
 async function createWindow(): Promise<void> {
     const config = loadConfig();
+    const storagePath = resolveStoragePath(config.storagePath, config.usesDefaultStoragePath);
+
     centerServer = await startCenterServer({
         port: config.port,
-        storagePath: config.storagePath,
+        storagePath,
         centerId: config.centerId,
         syncBaseUrl: config.syncBaseUrl,
         syncToken: config.syncToken,
@@ -53,6 +55,50 @@ async function createWindow(): Promise<void> {
         await mainWindow.loadURL(devServerUrl);
     } else {
         await mainWindow.loadFile(join(currentDir, '..', 'renderer', 'index.html'));
+    }
+}
+
+function resolveStoragePath(configuredStoragePath: string, usesDefaultStoragePath: boolean): string {
+    if (!usesDefaultStoragePath) {
+        return configuredStoragePath;
+    }
+
+    const stableStoragePath = join(app.getPath('userData'), 'data', 'offline.sqlite');
+    migrateLegacyDefaultStorage(configuredStoragePath, stableStoragePath);
+
+    return stableStoragePath;
+}
+
+function migrateLegacyDefaultStorage(legacyStoragePath: string, stableStoragePath: string): void {
+    const legacyPath = resolve(legacyStoragePath);
+
+    if (legacyPath === stableStoragePath || existsSync(stableStoragePath)) {
+        return;
+    }
+
+    const legacyFolder = dirname(legacyPath);
+    const stableFolder = dirname(stableStoragePath);
+    const legacyConfigPath = join(legacyFolder, 'center-config.json');
+    const stableConfigPath = join(stableFolder, 'center-config.json');
+
+    if (!existsSync(legacyPath) && !existsSync(legacyConfigPath)) {
+        return;
+    }
+
+    mkdirSync(stableFolder, { recursive: true });
+
+    if (existsSync(legacyPath)) {
+        copyFileSync(legacyPath, stableStoragePath);
+        copyIfExists(`${legacyPath}-wal`, `${stableStoragePath}-wal`);
+        copyIfExists(`${legacyPath}-shm`, `${stableStoragePath}-shm`);
+    }
+
+    copyIfExists(legacyConfigPath, stableConfigPath);
+}
+
+function copyIfExists(sourcePath: string, destinationPath: string): void {
+    if (existsSync(sourcePath) && !existsSync(destinationPath)) {
+        copyFileSync(sourcePath, destinationPath);
     }
 }
 

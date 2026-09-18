@@ -4,6 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
+    "allowJs": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
@@ -15,6 +16,7 @@
     "src/contracts/**/*.ts",
     "src/electron/**/*.ts",
     "src/server/**/*.ts",
+    "src/server/**/*.cjs",
     "src/services/**/*.ts"
   ]
 }

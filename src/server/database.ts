@@ -51,6 +51,9 @@ CREATE TABLE IF NOT EXISTS imported_exams (
     exam_code TEXT NOT NULL,
     title TEXT NOT NULL,
     organization_name TEXT NOT NULL,
+    institution_name TEXT,
+    institution_type TEXT NOT NULL DEFAULT 'cbt_center',
+    unit_label TEXT NOT NULL DEFAULT 'Subject',
     exam_type TEXT NOT NULL DEFAULT 'exam',
     center_id TEXT NOT NULL,
     organization_id TEXT NOT NULL,
@@ -83,6 +86,7 @@ CREATE TABLE IF NOT EXISTS subjects (
     exam_id TEXT NOT NULL,
     name TEXT NOT NULL,
     code TEXT,
+    unit_type TEXT NOT NULL DEFAULT 'subject',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (exam_id) REFERENCES imported_exams(id)
@@ -119,6 +123,7 @@ CREATE TABLE IF NOT EXISTS candidates (
     exam_id TEXT NOT NULL,
     candidate_no TEXT NOT NULL,
     full_name TEXT NOT NULL,
+    photo_url TEXT,
     access_code_hash TEXT NOT NULL,
     group_name TEXT,
     status TEXT NOT NULL DEFAULT 'not_started',
@@ -305,6 +310,9 @@ function ensureImportedExamColumns(connection: SqliteDatabase): void {
         { name: 'package_id', sql: 'ALTER TABLE imported_exams ADD COLUMN package_id TEXT' },
         { name: 'exam_code', sql: "ALTER TABLE imported_exams ADD COLUMN exam_code TEXT NOT NULL DEFAULT ''" },
         { name: 'organization_name', sql: "ALTER TABLE imported_exams ADD COLUMN organization_name TEXT NOT NULL DEFAULT ''" },
+        { name: 'institution_name', sql: 'ALTER TABLE imported_exams ADD COLUMN institution_name TEXT' },
+        { name: 'institution_type', sql: "ALTER TABLE imported_exams ADD COLUMN institution_type TEXT NOT NULL DEFAULT 'cbt_center'" },
+        { name: 'unit_label', sql: "ALTER TABLE imported_exams ADD COLUMN unit_label TEXT NOT NULL DEFAULT 'Subject'" },
         { name: 'actual_started_at', sql: 'ALTER TABLE imported_exams ADD COLUMN actual_started_at TEXT' },
         { name: 'actual_closed_at', sql: 'ALTER TABLE imported_exams ADD COLUMN actual_closed_at TEXT' },
     ]);
@@ -317,6 +325,14 @@ function ensureImportedExamColumns(connection: SqliteDatabase): void {
         { name: 'attempt_token', sql: 'ALTER TABLE candidate_attempts ADD COLUMN attempt_token TEXT' },
         { name: 'total_questions', sql: 'ALTER TABLE candidate_attempts ADD COLUMN total_questions INTEGER NOT NULL DEFAULT 0' },
         { name: 'total_marks', sql: 'ALTER TABLE candidate_attempts ADD COLUMN total_marks REAL NOT NULL DEFAULT 0' },
+    ]);
+
+    ensureColumns(connection, 'candidates', [
+        { name: 'photo_url', sql: 'ALTER TABLE candidates ADD COLUMN photo_url TEXT' },
+    ]);
+
+    ensureColumns(connection, 'subjects', [
+        { name: 'unit_type', sql: "ALTER TABLE subjects ADD COLUMN unit_type TEXT NOT NULL DEFAULT 'subject'" },
     ]);
 
     connection.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_candidate_attempts_attempt_token ON candidate_attempts(attempt_token)');

@@ -9,6 +9,9 @@ type ImportSummary = {
     exam_code: string;
     title: string;
     organization_name: string;
+    institution_name: string;
+    institution_type: string;
+    unit_label: string;
     candidate_count: number;
     question_count: number;
     duration_minutes: number;
@@ -209,6 +212,9 @@ function ImportSummaryCard({ summary, onViewImportedExams }: { summary: ImportSu
         ['Exam Title', summary.title],
         ['Exam Code', summary.exam_code],
         ['Organization', summary.organization_name],
+        ['Institution', summary.institution_name],
+        ['Context', formatContext(summary.institution_type)],
+        ['Unit Label', summary.unit_label],
         ['Candidates', String(summary.candidate_count)],
         ['Questions', String(summary.question_count)],
         ['Duration', `${summary.duration_minutes} minutes`],
@@ -239,6 +245,10 @@ function ImportSummaryCard({ summary, onViewImportedExams }: { summary: ImportSu
             </CardContent>
         </Card>
     );
+}
+
+function formatContext(value: string): string {
+    return value.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function Toast({ tone, message }: ToastState) {

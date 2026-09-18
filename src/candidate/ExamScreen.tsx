@@ -17,6 +17,14 @@ import type { CandidateExamPayload } from './CandidateApp';
 
 type AnswerState = Record<string, string[]>;
 type SaveStatus = 'Not saved' | 'Saving' | 'Saved' | 'Failed';
+type SubjectSection = {
+    key: string;
+    subject: string;
+    total: number;
+    answered: number;
+    percent: number;
+    questionIndexes: number[];
+};
 type PendingAnswer = {
     question_id: string;
     selected_option_id: string;
@@ -29,6 +37,16 @@ export type SubmissionSummary = {
 };
 
 const apiBaseUrl = window.location.origin;
+
+function CandidatePhoto({ candidate }: { candidate: CandidateExamPayload['candidate'] }) {
+    return (
+        <img
+            src={candidate.photo_url ?? './images/default-user.jpg'}
+            alt={candidate.full_name}
+            className="h-14 w-14 shrink-0 rounded-md border border-border bg-slate-100 object-cover"
+        />
+    );
+}
 
 export function ExamScreen({
     payload,
@@ -61,6 +79,19 @@ export function ExamScreen({
         () => currentQuestion ? payload.options.filter((option) => option.question_id === currentQuestion.id) : [],
         [currentQuestion, payload.options],
     );
+    const unitLabel = payload.exam.unit_label?.trim() || 'Subject';
+    const subjectSummaries = useMemo(
+        () => subjectProgress(payload.questions, answers, payload.subjects ?? payload.units ?? [], unitLabel),
+        [answers, payload.questions, payload.subjects, payload.units, unitLabel],
+    );
+    const currentSubject = subjectSummaries.find((summary) => summary.questionIndexes.includes(currentIndex)) ?? subjectSummaries[0];
+    const currentSubjectQuestionIndexes = currentSubject?.questionIndexes ?? [];
+    const currentSubjectQuestionIndex = Math.max(0, currentSubjectQuestionIndexes.indexOf(currentIndex));
+    const currentSubjectQuestions = currentSubjectQuestionIndexes
+        .map((index) => payload.questions[index])
+        .filter((question): question is CandidateExamPayload['questions'][number] => Boolean(question));
+    const previousIndex = previousQuestionIndex(currentIndex, subjectSummaries);
+    const nextIndex = nextQuestionIndex(currentIndex, subjectSummaries, payload.questions.length);
     const selectedOptionIds = currentQuestion ? answers[currentQuestion.id] ?? [] : [];
     const pendingAnswerCount = Object.keys(pendingAnswers).length;
     const answered = answeredCount(answers);
@@ -93,7 +124,16 @@ export function ExamScreen({
                     return;
                 }
 
-                socket = io(window.location.origin);
+                socket = io(window.location.origin, {
+                    auth: {
+                        client_type: 'candidate_client',
+                    },
+                    transports: ['websocket', 'polling'],
+                });
+                socket.emit('client_connected', {
+                    client_type: 'candidate_client',
+                    timestamp: new Date().toISOString(),
+                });
                 socket.emit('candidate:join', { attempt_token: attemptToken });
                 socket.on('exam_closed', (socketPayload) => {
                     const record = typeof socketPayload === 'object' && socketPayload !== null ? socketPayload as Record<string, unknown> : {};
@@ -325,21 +365,78 @@ export function ExamScreen({
     }
 
     function goPrevious() {
-        setCurrentIndex((index) => Math.max(0, index - 1));
+        setCurrentIndex((index) => previousQuestionIndex(index, subjectSummaries));
     }
 
     function goNext() {
-        setCurrentIndex((index) => Math.min(payload.questions.length - 1, index + 1));
+        setCurrentIndex((index) => nextQuestionIndex(index, subjectSummaries, payload.questions.length));
     }
+
+    useEffect(() => {
+        function handleKeyDown(event: KeyboardEvent) {
+            const target = event.target as HTMLElement | null;
+
+            if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) {
+                return;
+            }
+
+            const key = event.key.toUpperCase();
+
+            if (confirmSubmitOpen) {
+                if (key === 'Y' && pendingAnswerCount === 0 && !submitting) {
+                    event.preventDefault();
+                    void submitExam();
+                }
+
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    setConfirmSubmitOpen(false);
+                }
+
+                return;
+            }
+
+            if (['A', 'B', 'C', 'D', 'E'].includes(key) && !optionsDisabled) {
+                const option = currentOptions.find((item) => item.option_label.toUpperCase() === key);
+
+                if (option) {
+                    event.preventDefault();
+                    selectOption(option.id);
+                }
+            }
+
+            if (key === 'N') {
+                event.preventDefault();
+                goNext();
+            }
+
+            if (key === 'P') {
+                event.preventDefault();
+                goPrevious();
+            }
+
+            if (key === 'S') {
+                event.preventDefault();
+                setConfirmSubmitOpen(true);
+            }
+        }
+
+        window.addEventListener('keydown', handleKeyDown);
+
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [confirmSubmitOpen, currentOptions, optionsDisabled, pendingAnswerCount, submitting, subjectSummaries]);
 
     return (
         <main className="min-h-screen bg-lightBackground text-slateDark">
             <header className="fixed inset-x-0 top-0 z-40 border-b border-border bg-white shadow-sm">
                 <div className="grid min-h-20 gap-3 px-4 py-3 lg:grid-cols-[1.1fr_1.3fr_auto_auto_auto] lg:items-center">
-                    <div className="min-w-0">
-                        <div className="text-xs font-semibold uppercase text-slate-500">Candidate</div>
-                        <div className="truncate text-base font-bold">{payload.candidate.full_name}</div>
-                        <div className="truncate text-sm text-slate-500">{payload.candidate.registration_number}</div>
+                    <div className="flex min-w-0 items-center gap-3">
+                        <CandidatePhoto candidate={payload.candidate} />
+                        <div className="min-w-0">
+                            <div className="text-xs font-semibold uppercase text-slate-500">Candidate</div>
+                            <div className="truncate text-base font-bold">{payload.candidate.full_name}</div>
+                            <div className="truncate text-sm text-slate-500">{payload.candidate.registration_number}</div>
+                        </div>
                     </div>
                     <div className="min-w-0">
                         <div className="text-xs font-semibold uppercase text-slate-500">Exam</div>
@@ -368,8 +465,30 @@ export function ExamScreen({
                             <h2 className="text-base font-bold">Question Palette</h2>
                             <span className="text-sm text-slate-500">{answered} / {payload.questions.length}</span>
                         </div>
+                        {subjectSummaries.length > 1 && (
+                            <div className="mt-4 space-y-2">
+                                {subjectSummaries.map((summary) => (
+                                    <button
+                                        className={`w-full rounded-md border p-2 text-left transition ${summary.key === currentSubject?.key ? 'border-primary bg-green-50' : 'border-border hover:border-primary'}`}
+                                        key={summary.key}
+                                        onClick={() => setCurrentIndex(summary.questionIndexes[0])}
+                                        type="button"
+                                    >
+                                        <div className="truncate text-xs font-bold text-slateDark">{summary.subject}</div>
+                                        <div className="mt-1 h-2 rounded bg-slate-100">
+                                            <div className="h-2 rounded bg-primary" style={{ width: `${summary.percent}%` }} />
+                                        </div>
+                                        <div className="mt-1 text-xs text-slate-500">{summary.answered}/{summary.total} answered</div>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        <div className="mt-5 text-sm font-semibold text-slateDark">{currentSubject?.subject ?? unitLabel} Palette</div>
                         <div className="mt-4 grid grid-cols-5 gap-2">
-                            {payload.questions.map((question, index) => (
+                            {currentSubjectQuestions.map((question, subjectIndex) => {
+                                const index = currentSubjectQuestionIndexes[subjectIndex];
+
+                                return (
                                 <button
                                     className={paletteClass({
                                         current: index === currentIndex,
@@ -380,9 +499,10 @@ export function ExamScreen({
                                     onClick={() => setCurrentIndex(index)}
                                     type="button"
                                 >
-                                    {index + 1}
+                                    {subjectIndex + 1}
                                 </button>
-                            ))}
+                                );
+                            })}
                         </div>
                         <div className="mt-5 grid gap-2 text-xs text-slate-500">
                             <Legend color="bg-primary" label="Current" />
@@ -425,8 +545,9 @@ export function ExamScreen({
                             <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div>
                                     <div className="text-sm font-bold uppercase text-primary">
-                                        Question {currentIndex + 1} of {payload.questions.length}
+                                        {currentSubject?.subject ?? `General ${unitLabel}`} | Question {currentSubjectQuestionIndex + 1} of {currentSubject?.total ?? payload.questions.length}
                                     </div>
+                                    <div className="mt-1 text-xs font-semibold text-slate-500">Overall question {currentIndex + 1} of {payload.questions.length}</div>
                                     <div className="mt-1 text-sm text-slate-500">{currentQuestion.marks} mark(s)</div>
                                 </div>
                                 <Button onClick={toggleReview} type="button" variant="secondary">
@@ -489,12 +610,12 @@ export function ExamScreen({
 
             <footer className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-white px-4 py-3 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                    <Button className="h-12 px-5 text-base" disabled={currentIndex === 0} onClick={goPrevious} size="default" type="button" variant="secondary">
+                    <Button className="h-12 px-5 text-base" disabled={previousIndex === currentIndex} onClick={goPrevious} size="default" type="button" variant="secondary">
                         <ChevronLeft className="h-5 w-5" />
                         Previous
                     </Button>
                     <div className="flex items-center gap-3">
-                        <Button className="h-12 px-5 text-base" disabled={currentIndex === payload.questions.length - 1} onClick={goNext} size="default" type="button">
+                        <Button className="h-12 px-5 text-base" disabled={nextIndex === currentIndex} onClick={goNext} size="default" type="button">
                             Next
                             <ChevronRight className="h-5 w-5" />
                         </Button>
@@ -585,6 +706,73 @@ function buildSavedAnswerState(payload: CandidateExamPayload): AnswerState {
 
 function answeredCount(answers: AnswerState): number {
     return Object.values(answers).filter((answer) => answer.length > 0).length;
+}
+
+function subjectProgress(
+    questions: CandidateExamPayload['questions'],
+    answers: AnswerState,
+    subjects: NonNullable<CandidateExamPayload['subjects']>,
+    unitLabel: string,
+): SubjectSection[] {
+    const subjectsById = new Map(subjects.map((subject) => [subject.id, subject]));
+    const grouped = new Map<string, SubjectSection>();
+
+    questions.forEach((question, index) => {
+        const subject = question.subject_id ? subjectsById.get(question.subject_id) : null;
+        const key = question.subject_id ? `subject:${question.subject_id}` : 'subject:general';
+        const name = subject?.name ?? `General ${unitLabel}`;
+        const existing = grouped.get(key) ?? { key, subject: name, total: 0, answered: 0, percent: 0, questionIndexes: [] };
+
+        existing.total += 1;
+        existing.answered += answers[question.id]?.length ? 1 : 0;
+        existing.questionIndexes.push(index);
+        grouped.set(key, existing);
+    });
+
+    return Array.from(grouped.values()).map((summary) => ({
+        ...summary,
+        percent: summary.total > 0 ? Math.round((summary.answered / summary.total) * 100) : 0,
+    }));
+}
+
+function nextQuestionIndex(currentIndex: number, subjects: SubjectSection[], questionCount: number): number {
+    const currentSubjectIndex = subjects.findIndex((subject) => subject.questionIndexes.includes(currentIndex));
+    const currentSubject = subjects[currentSubjectIndex];
+
+    if (!currentSubject) {
+        return Math.min(questionCount - 1, currentIndex + 1);
+    }
+
+    const currentPosition = currentSubject.questionIndexes.indexOf(currentIndex);
+    const nextInSubject = currentSubject.questionIndexes[currentPosition + 1];
+
+    if (nextInSubject !== undefined) {
+        return nextInSubject;
+    }
+
+    const nextSubject = subjects[currentSubjectIndex + 1];
+
+    return nextSubject?.questionIndexes[0] ?? currentIndex;
+}
+
+function previousQuestionIndex(currentIndex: number, subjects: SubjectSection[]): number {
+    const currentSubjectIndex = subjects.findIndex((subject) => subject.questionIndexes.includes(currentIndex));
+    const currentSubject = subjects[currentSubjectIndex];
+
+    if (!currentSubject) {
+        return Math.max(0, currentIndex - 1);
+    }
+
+    const currentPosition = currentSubject.questionIndexes.indexOf(currentIndex);
+    const previousInSubject = currentSubject.questionIndexes[currentPosition - 1];
+
+    if (previousInSubject !== undefined) {
+        return previousInSubject;
+    }
+
+    const previousSubject = subjects[currentSubjectIndex - 1];
+
+    return previousSubject ? previousSubject.questionIndexes[previousSubject.questionIndexes.length - 1] : currentIndex;
 }
 
 function formatSeconds(seconds: number): string {

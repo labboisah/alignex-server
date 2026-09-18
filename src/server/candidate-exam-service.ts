@@ -20,11 +20,15 @@ type AttemptContext = {
     candidate_id: string;
     candidate_no: string;
     full_name: string;
+    photo_url: string | null;
     group_name: string | null;
     exam_id: string;
     exam_code: string;
     title: string;
     organization_name: string;
+    institution_name: string | null;
+    institution_type: string;
+    unit_label: string;
     duration_minutes: number;
     actual_started_at: string | null;
     raw_payload: string | null;
@@ -51,6 +55,7 @@ type SubjectRow = {
     id: string;
     name: string;
     code: string | null;
+    unit_type: string;
 };
 
 type PaperRow = {
@@ -64,6 +69,7 @@ export type CandidateExamPayload = {
         id: string;
         registration_number: string;
         full_name: string;
+        photo_url: string | null;
         group_name: string | null;
     };
     exam: {
@@ -71,6 +77,9 @@ export type CandidateExamPayload = {
         exam_code: string;
         title: string;
         organization_name: string;
+        institution_name: string | null;
+        institution_type: string;
+        unit_label: string;
         duration_minutes: number;
         total_questions: number;
     };
@@ -78,6 +87,13 @@ export type CandidateExamPayload = {
         id: string;
         name: string;
         code: string | null;
+        unit_type: string;
+    }>;
+    units: Array<{
+        id: string;
+        name: string;
+        code: string | null;
+        unit_type: string;
     }>;
     questions: Array<{
         id: string;
@@ -173,6 +189,7 @@ export function getCandidateExam(connection: Database, attemptToken: string): Ca
             id: context.candidate_id,
             registration_number: context.candidate_no,
             full_name: context.full_name,
+            photo_url: context.photo_url,
             group_name: context.group_name,
         },
         exam: {
@@ -180,10 +197,14 @@ export function getCandidateExam(connection: Database, attemptToken: string): Ca
             exam_code: context.exam_code,
             title: context.title,
             organization_name: context.organization_name,
+            institution_name: context.institution_name,
+            institution_type: context.institution_type,
+            unit_label: context.unit_label,
             duration_minutes: context.duration_minutes,
             total_questions: questions.length,
         },
         subjects,
+        units: subjects,
         questions,
         options,
         saved_answers: loadSavedAnswers(connection, context.attempt_id),
@@ -261,11 +282,15 @@ function getAttemptContext(connection: Database, attemptToken: string): AttemptC
             candidates.id AS candidate_id,
             candidates.candidate_no,
             candidates.full_name,
+            candidates.photo_url,
             candidates.group_name,
             imported_exams.id AS exam_id,
             imported_exams.exam_code,
             imported_exams.title,
             imported_exams.organization_name,
+            imported_exams.institution_name,
+            imported_exams.institution_type,
+            imported_exams.unit_label,
             imported_exams.duration_minutes,
             imported_exams.actual_started_at,
             imported_exams.raw_payload
@@ -285,7 +310,7 @@ function getAttemptContext(connection: Database, attemptToken: string): AttemptC
 
 function loadSubjects(connection: Database, examId: string): SubjectRow[] {
     return connection.prepare(`
-        SELECT id, name, code
+        SELECT id, name, code, unit_type
         FROM subjects
         WHERE exam_id = ?
         ORDER BY rowid ASC

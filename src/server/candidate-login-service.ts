@@ -15,6 +15,7 @@ export type CandidateLoginResponse = {
         id: string;
         registration_number: string;
         full_name: string;
+        photo_url: string | null;
         group_name: string | null;
     };
     exam: {
@@ -22,6 +23,9 @@ export type CandidateLoginResponse = {
         exam_code: string;
         title: string;
         organization_name: string;
+        institution_name: string | null;
+        institution_type: string;
+        unit_label: string;
         duration_minutes: number;
         total_questions: number;
         started_at: string | null;
@@ -45,6 +49,9 @@ type ExamRow = {
     exam_code: string;
     title: string;
     organization_name: string;
+    institution_name: string | null;
+    institution_type: string;
+    unit_label: string;
     duration_minutes: number;
     status: string;
     actual_started_at: string | null;
@@ -54,6 +61,7 @@ type CandidateRow = {
     id: string;
     candidate_no: string;
     full_name: string;
+    photo_url: string | null;
     group_name: string | null;
     status: string;
 };
@@ -69,22 +77,26 @@ type AttemptRow = {
 
 export function loginCandidate(connection: Database, request: CandidateLoginRequest): CandidateLoginResponse {
     validateRequest(request);
+    const normalizedRegistrationNumber = normalizeRegistrationNumber(request.registration_number);
 
     const exam = request.exam_code?.trim()
         ? connection.prepare(`
-            SELECT id, exam_code, title, organization_name, duration_minutes, status, actual_started_at
+            SELECT id, exam_code, title, organization_name, institution_name, institution_type, unit_label, duration_minutes, status, actual_started_at
             FROM imported_exams
             WHERE exam_code = ?
             LIMIT 1
         `).get(request.exam_code.trim()) as ExamRow | undefined
-        : findActiveExamForCandidate(connection, request.registration_number);
+        : findActiveExamForCandidate(connection, normalizedRegistrationNumber);
 
     if (!exam) {
         throw new CandidateLoginError('No active exam was found for this registration number.', 'active_exam_not_found', 404);
     }
 
     try {
-        return loginCandidateForExam(connection, exam, request);
+        return loginCandidateForExam(connection, exam, {
+            ...request,
+            registration_number: normalizedRegistrationNumber,
+        });
     } catch (error) {
         logCandidateLoginFailure(connection, exam.id, null, error instanceof Error ? error.message : 'Candidate login failed.');
         throw error;
@@ -97,11 +109,11 @@ function loginCandidateForExam(connection: Database, exam: ExamRow, request: Can
     }
 
     const candidate = connection.prepare(`
-        SELECT id, candidate_no, full_name, group_name, status
+        SELECT id, candidate_no, full_name, photo_url, group_name, status
         FROM candidates
         WHERE exam_id = ? AND candidate_no = ?
         LIMIT 1
-    `).get(exam.id, request.registration_number.trim()) as CandidateRow | undefined;
+    `).get(exam.id, normalizeRegistrationNumber(request.registration_number)) as CandidateRow | undefined;
 
     if (!candidate) {
         throw new CandidateLoginError('Candidate not found for this exam.', 'candidate_not_found', 404);
@@ -192,6 +204,7 @@ function loginCandidateForExam(connection: Database, exam: ExamRow, request: Can
             id: candidate.id,
             registration_number: candidate.candidate_no,
             full_name: candidate.full_name,
+            photo_url: candidate.photo_url,
             group_name: candidate.group_name,
         },
         exam: {
@@ -199,6 +212,9 @@ function loginCandidateForExam(connection: Database, exam: ExamRow, request: Can
             exam_code: exam.exam_code,
             title: exam.title,
             organization_name: exam.organization_name,
+            institution_name: exam.institution_name,
+            institution_type: exam.institution_type,
+            unit_label: exam.unit_label,
             duration_minutes: exam.duration_minutes,
             total_questions: countQuestions(connection, exam.id),
             started_at: exam.actual_started_at,
@@ -222,12 +238,19 @@ function validateRequest(request: CandidateLoginRequest): void {
     }
 }
 
+function normalizeRegistrationNumber(value: string): string {
+    return value.trim().toUpperCase();
+}
+
 function findActiveExamForCandidate(connection: Database, registrationNumber: string): ExamRow | undefined {
     return connection.prepare(`
         SELECT imported_exams.id,
                imported_exams.exam_code,
                imported_exams.title,
                imported_exams.organization_name,
+               imported_exams.institution_name,
+               imported_exams.institution_type,
+               imported_exams.unit_label,
                imported_exams.duration_minutes,
                imported_exams.status,
                imported_exams.actual_started_at

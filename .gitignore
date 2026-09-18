@@ -4,3 +4,6 @@ data
 keys
 .env
 *.log
+
+releases/
+.test-artifacts/

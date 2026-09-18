@@ -3,6 +3,7 @@ export type BrowserSocket = {
     off: (event: string, callback?: (payload?: unknown) => void) => BrowserSocket;
     emit: (event: string, payload?: unknown) => BrowserSocket;
     disconnect: () => void;
+    removeAllListeners: () => void;
 };
 
 type SocketFactory = (url?: string, options?: Record<string, unknown>) => BrowserSocket;

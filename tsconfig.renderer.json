@@ -20,5 +20,5 @@
       "@/*": ["src/renderer/*"]
     }
   },
-  "include": ["src/candidate/**/*.ts", "src/candidate/**/*.tsx", "src/contracts/**/*.ts", "src/renderer/**/*.ts", "src/renderer/**/*.tsx"]
+  "include": ["src/adaptive/**/*.tsx", "src/candidate/**/*.ts", "src/candidate/**/*.tsx", "src/contracts/**/*.ts", "src/renderer/**/*.ts", "src/renderer/**/*.tsx"]
 }

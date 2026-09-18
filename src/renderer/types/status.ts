@@ -3,6 +3,9 @@ export type CenterServerStatus = {
     localIpAddress: string;
     candidateUrl: string;
     port: number;
+    organizationDisplayName: string | null;
+    organizationName: string | null;
+    centerName: string | null;
     connectedCandidates: number;
     importedExams: number;
     activeCandidates: number;

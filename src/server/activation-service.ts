@@ -1,6 +1,6 @@
 import type DatabaseConstructor from 'better-sqlite3';
 import { createHash, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { normalizePlanFeatures, type PlanFeatures, type PlanSummary } from './plan-features.js';
 
@@ -30,6 +30,7 @@ export type LocalSyncConfig = {
     admin_password: string | null;
     sync_token: string | null;
     center_id: string | null;
+    device_id: string | null;
 };
 
 export class ActivationError extends Error {
@@ -195,6 +196,53 @@ export function loginLocalAdmin(connection: SqliteDatabase, email: string, passw
     return { success: true, admin: { name: admin.name, email: admin.email } };
 }
 
+export async function deactivateLocal(connection: SqliteDatabase, databasePath: string, password: string): Promise<ActivationStatus> {
+    const config = readLocalConfig(databasePath);
+    const license = getLatestLicense(connection);
+
+    if (!config || !license || license.status !== 'activated') {
+        throw new ActivationError('This server does not have an active license.', 409);
+    }
+
+    loginLocalAdmin(connection, config.admin_email ?? '', password);
+
+    const activeAttempt = connection
+        .prepare("SELECT COUNT(*) AS count FROM candidate_attempts WHERE status = 'active'")
+        .get() as { count: number };
+
+    if (Number(activeAttempt.count) > 0) {
+        throw new ActivationError('Deactivate is blocked while a candidate exam is active. Close the exam before deactivating this server.', 409);
+    }
+
+    const portalUrl = normalizeUrl(config.portal_url ?? '');
+    const response = await fetch(`${portalUrl}/api/offline/deactivate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            license_key: license.license_key,
+            device_id: license.device_id,
+            admin_email: config.admin_email,
+            admin_password: password,
+        }),
+    });
+    const remote = (await response.json().catch(() => ({}))) as { message?: string };
+
+    if (!response.ok) {
+        throw new ActivationError(remote.message ?? 'The portal could not confirm server deactivation.', response.status >= 400 && response.status < 500 ? response.status : 503);
+    }
+
+    const now = new Date().toISOString();
+    connection.prepare('UPDATE license_activations SET status = ?, updated_at = ? WHERE id = ?').run('revoked', now, license.id);
+    writeSetting(connection, 'application_state', 'revoked');
+
+    const configPath = localConfigPath(databasePath);
+    if (existsSync(configPath)) {
+        unlinkSync(configPath);
+    }
+
+    return getActivationStatus(connection, databasePath);
+}
+
 export function getLocalSyncConfig(connection: SqliteDatabase, databasePath: string): LocalSyncConfig {
     const config = readLocalConfig(databasePath);
     const license = getLatestLicense(connection);
@@ -203,8 +251,9 @@ export function getLocalSyncConfig(connection: SqliteDatabase, databasePath: str
         portal_url: config?.portal_url ?? null,
         admin_email: config?.admin_email ?? null,
         admin_password: config?.admin_password ?? null,
-        sync_token: config?.sync_token ?? null,
+        sync_token: config?.sync_token ?? license?.license_key ?? null,
         center_id: license?.center_id ?? config?.center_id ?? null,
+        device_id: config?.device_id ?? ensureDeviceId(connection),
     };
 }
 
@@ -225,6 +274,7 @@ type LicensePayload = {
 
 type LicenseRow = {
     id: string;
+    device_id: string;
     license_key: string;
     organization_name: string;
     center_name: string;
@@ -320,7 +370,7 @@ function getLatestLicense(connection: SqliteDatabase): LicenseRow | null {
     return (
         (connection
             .prepare(
-                'SELECT id, license_key, organization_name, center_name, center_id, status, activated_at, expires_at, raw_payload FROM license_activations ORDER BY created_at DESC LIMIT 1',
+                'SELECT id, device_id, license_key, organization_name, center_name, center_id, status, activated_at, expires_at, raw_payload FROM license_activations ORDER BY created_at DESC LIMIT 1',
             )
             .get() as LicenseRow | undefined) ?? null
     );

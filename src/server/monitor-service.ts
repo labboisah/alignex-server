@@ -17,6 +17,10 @@ export type MonitorCandidateRow = {
     full_name: string;
     registration_number: string;
     status: string;
+    connected: boolean;
+    connected_at: string | null;
+    socket_id: string | null;
+    user_agent: string | null;
     answered_count: number;
     total_questions: number;
     unanswered_count: number;
@@ -32,6 +36,16 @@ export type CandidateSocketIdentity = {
     attempt_id: string;
     candidate_id: string;
     exam_id: string;
+    full_name: string;
+    registration_number: string;
+    ip_address: string | null;
+    device_fingerprint: string | null;
+};
+
+export type ConnectedCandidateSnapshot = CandidateSocketIdentity & {
+    connected_at: string;
+    socket_id: string;
+    user_agent: string | null;
 };
 
 type CandidateMonitorQueryRow = {
@@ -82,7 +96,7 @@ export function getMonitorSummary(connection: Database, examId: string, connecte
     };
 }
 
-export function listMonitorCandidates(connection: Database, examId: string): MonitorCandidateRow[] {
+export function listMonitorCandidates(connection: Database, examId: string, connectedCandidates = new Map<string, ConnectedCandidateSnapshot>()): MonitorCandidateRow[] {
     const rows = connection.prepare(`
         SELECT
             candidates.id,
@@ -114,18 +128,23 @@ export function listMonitorCandidates(connection: Database, examId: string): Mon
     return rows.map((row) => {
         const totalQuestions = Number(row.total_questions) || 0;
         const answeredCount = Number(row.answered_count) || 0;
+        const connectedCandidate = connectedCandidates.get(row.id);
 
         return {
             id: row.id,
             full_name: row.full_name,
             registration_number: row.registration_number,
             status: row.attempt_status ?? row.candidate_status,
+            connected: Boolean(connectedCandidate),
+            connected_at: connectedCandidate?.connected_at ?? null,
+            socket_id: connectedCandidate?.socket_id ?? null,
+            user_agent: connectedCandidate?.user_agent ?? null,
             answered_count: answeredCount,
             total_questions: totalQuestions,
             unanswered_count: Math.max(totalQuestions - answeredCount, 0),
             progress_percentage: totalQuestions > 0 ? Math.round((answeredCount / totalQuestions) * 100) : 0,
-            ip_address: row.ip_address,
-            device_fingerprint: row.device_fingerprint,
+            ip_address: connectedCandidate?.ip_address ?? row.ip_address,
+            device_fingerprint: connectedCandidate?.device_fingerprint ?? row.device_fingerprint,
             started_at: row.started_at,
             last_saved_at: row.last_saved_at,
             submitted_at: row.submitted_at,
@@ -185,11 +204,57 @@ export function getCandidateSocketIdentity(connection: Database, attemptToken: s
     }
 
     const row = connection.prepare(`
-        SELECT id AS attempt_id, candidate_id, exam_id
+        SELECT
+            candidate_attempts.id AS attempt_id,
+            candidate_attempts.candidate_id,
+            candidate_attempts.exam_id,
+            candidates.full_name,
+            candidates.candidate_no AS registration_number,
+            candidate_attempts.ip_address,
+            candidate_attempts.device_fingerprint
         FROM candidate_attempts
+        INNER JOIN candidates ON candidates.id = candidate_attempts.candidate_id
         WHERE attempt_token = ?
         LIMIT 1
     `).get(attemptToken) as CandidateSocketIdentity | undefined;
+
+    return row ?? null;
+}
+
+export function getCandidateSocketIdentityFromPayload(
+    connection: Database,
+    payload: { attempt_token?: unknown; candidate_id?: unknown; exam_id?: unknown },
+): CandidateSocketIdentity | null {
+    const attemptToken = typeof payload.attempt_token === 'string' ? payload.attempt_token : '';
+    const identity = getCandidateSocketIdentity(connection, attemptToken);
+
+    if (identity) {
+        return identity;
+    }
+
+    const candidateId = typeof payload.candidate_id === 'string' ? payload.candidate_id.trim() : '';
+    const examId = typeof payload.exam_id === 'string' ? payload.exam_id.trim() : '';
+
+    if (!candidateId || !examId) {
+        return null;
+    }
+
+    const row = connection.prepare(`
+        SELECT
+            candidate_attempts.id AS attempt_id,
+            candidate_attempts.candidate_id,
+            candidate_attempts.exam_id,
+            candidates.full_name,
+            candidates.candidate_no AS registration_number,
+            candidate_attempts.ip_address,
+            candidate_attempts.device_fingerprint
+        FROM candidate_attempts
+        INNER JOIN candidates ON candidates.id = candidate_attempts.candidate_id
+        WHERE candidate_attempts.exam_id = ?
+          AND candidate_attempts.candidate_id = ?
+          AND candidate_attempts.status = 'active'
+        LIMIT 1
+    `).get(examId, candidateId) as CandidateSocketIdentity | undefined;
 
     return row ?? null;
 }

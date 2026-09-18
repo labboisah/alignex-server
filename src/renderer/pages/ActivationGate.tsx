@@ -1,9 +1,10 @@
-import { AlertTriangle, CheckCircle2, Loader2, Wrench } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, Power, Wrench } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { ConfirmDialog } from '../components/ui/confirm-dialog';
 
 const apiBaseUrl = 'http://127.0.0.1:4080';
 
@@ -99,6 +100,34 @@ export function ActivationGate({ children }: { children: ReactNode | ((controls:
         }
     }
 
+    async function handleDeactivate(password: string): Promise<boolean> {
+        setBusy(true);
+        setError(null);
+
+        try {
+            const response = await fetch(`${apiBaseUrl}/api/app/deactivate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password }),
+            });
+            const data = (await response.json()) as { status?: ActivationStatus; message?: string };
+
+            if (!response.ok) {
+                throw new Error(data.message ?? 'Deactivation failed.');
+            }
+
+            setAuthenticated(false);
+            setStatus(data.status ?? null);
+            setMode('activation');
+            return true;
+        } catch (caught) {
+            setError(caught instanceof Error ? caught.message : 'Deactivation failed.');
+            return false;
+        } finally {
+            setBusy(false);
+        }
+    }
+
     if (loading) {
         return (
             <Centered>
@@ -137,7 +166,7 @@ export function ActivationGate({ children }: { children: ReactNode | ((controls:
                 )}
 
                 {status && status.state !== 'not_configured' && (
-                    <LicenseBanner status={status} onRefresh={() => void refreshState()} />
+                    <LicenseBanner status={status} busy={busy} onDeactivate={handleDeactivate} onRefresh={() => void refreshState()} />
                 )}
 
                 {mode === 'activation' && <ActivationForm busy={busy} onSubmit={(body) => void post('/api/app/activate', body)} />}
@@ -195,7 +224,9 @@ function LocalLogin({ busy, defaultEmail, onSubmit }: { busy: boolean; defaultEm
     );
 }
 
-function LicenseBanner({ status, onRefresh }: { status: ActivationStatus; onRefresh: () => void }) {
+function LicenseBanner({ status, busy, onDeactivate, onRefresh }: { status: ActivationStatus; busy: boolean; onDeactivate: (password: string) => Promise<boolean>; onRefresh: () => void }) {
+    const [dialogOpen, setDialogOpen] = useState(false);
+    const [password, setPassword] = useState('');
     const tone = status.state === 'activated' ? 'border-success/30 bg-success/5' : 'border-warning/40 bg-warning/5';
     const Icon = status.state === 'maintenance' ? Wrench : status.state === 'activated' ? CheckCircle2 : AlertTriangle;
 
@@ -213,10 +244,46 @@ function LicenseBanner({ status, onRefresh }: { status: ActivationStatus; onRefr
                         </div>
                     </div>
                 </div>
-                <Button size="sm" variant="outline" onClick={onRefresh}>
-                    Refresh
-                </Button>
+                <div className="flex shrink-0 gap-2">
+                    <Button size="sm" variant="outline" onClick={onRefresh}>Refresh</Button>
+                    {status.state === 'activated' && (
+                        <Button size="sm" variant="danger" onClick={() => setDialogOpen(true)}>
+                            <Power className="h-4 w-4" />
+                            Deactivate
+                        </Button>
+                    )}
+                </div>
             </div>
+            <ConfirmDialog
+                open={dialogOpen}
+                title="Deactivate this server?"
+                message="Your local exam database will be preserved, but this server will stop using its current license. Reactivation will require the activation code again."
+                confirmLabel="Deactivate Server"
+                confirmTone="danger"
+                loading={busy}
+                onOpenChange={(open) => {
+                    setDialogOpen(open);
+                    if (!open) setPassword('');
+                }}
+                onConfirm={() => void onDeactivate(password).then((success) => {
+                    if (success) {
+                        setDialogOpen(false);
+                        setPassword('');
+                    }
+                })}
+            >
+                <label className="block space-y-2">
+                    <span className="text-sm font-medium text-slateDark">Local admin password</span>
+                    <input
+                        autoFocus
+                        className="h-11 w-full rounded-md border border-border bg-white px-3 text-sm text-slateDark outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                        onChange={(event) => setPassword(event.target.value)}
+                        placeholder="Enter password to confirm"
+                        type="password"
+                        value={password}
+                    />
+                </label>
+            </ConfirmDialog>
         </div>
     );
 }

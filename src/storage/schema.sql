@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS imported_exams (
     exam_code TEXT NOT NULL,
     title TEXT NOT NULL,
     organization_name TEXT NOT NULL,
+    institution_name TEXT,
+    institution_type TEXT NOT NULL DEFAULT 'cbt_center',
+    unit_label TEXT NOT NULL DEFAULT 'Subject',
     exam_type TEXT NOT NULL DEFAULT 'exam',
     center_id TEXT NOT NULL,
     organization_id TEXT NOT NULL,
@@ -72,6 +75,7 @@ CREATE TABLE IF NOT EXISTS subjects (
     exam_id TEXT NOT NULL,
     name TEXT NOT NULL,
     code TEXT,
+    unit_type TEXT NOT NULL DEFAULT 'subject',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -104,6 +108,7 @@ CREATE TABLE IF NOT EXISTS candidates (
     exam_id TEXT NOT NULL,
     candidate_no TEXT NOT NULL,
     full_name TEXT NOT NULL,
+    photo_url TEXT,
     access_code_hash TEXT NOT NULL,
     group_name TEXT,
     status TEXT NOT NULL DEFAULT 'not_started',

@@ -46,9 +46,22 @@ export function CenterAppShell({ children, currentPage, onNavigate, onLogout }: 
                         <img src="./images/logo.png" alt="AlignEx" className="h-11 w-11 object-contain" />
                         <div>
                             <div className="text-lg font-semibold text-slateDark">AlignEx Center</div>
-                            <div className="mt-1 text-sm text-slate-500">Offline CBT Server</div>
+                            <div className="mt-1 text-sm text-slate-500">Offline Exam Server</div>
                         </div>
                     </div>
+                    {status?.organizationDisplayName && (
+                        <div className="mt-4 rounded-md border border-primary/20 bg-primary/5 px-3 py-2">
+                            <div className="text-xs font-semibold uppercase text-primary">Assigned To</div>
+                            <div className="mt-1 truncate text-sm font-bold text-slateDark" title={status.organizationDisplayName}>
+                                {status.organizationDisplayName}
+                            </div>
+                            {status.organizationName && status.organizationName !== status.organizationDisplayName && (
+                                <div className="mt-1 truncate text-xs font-semibold text-slate-500" title={status.organizationName}>
+                                    {status.organizationName}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 <nav className="flex-1 space-y-1 p-4">
