@@ -12,3 +12,11 @@
         margin: 0;
     }
 }
+
+.center-access-page { min-height: 100vh; display: grid; place-items: center; padding: 28px; background: linear-gradient(135deg, #edf6ef 0%, #f8fbf8 55%, #fff7e4 100%); }
+.center-access-shell { width: min(1080px, 100%); display: grid; grid-template-columns: minmax(300px, .85fr) minmax(440px, 1.15fr); border: 1px solid #c8dec9; background: rgba(255, 255, 255, .96); box-shadow: 0 24px 64px rgba(6, 78, 59, .16); }
+.center-access-brand { min-height: 650px; padding: 52px 44px; display: flex; flex-direction: column; background: #064e3b; color: #dff4e4; }
+.server-brand { min-height: 154px; display: flex; align-items: flex-start; }.server-brand img { width: min(245px, 100%); max-height: 180px; object-fit: contain; object-position: left top; }
+.center-access-rule { width: 66px; height: 3px; margin: 28px 0 19px; background: #f59e0b; }.center-access-brand h1 { max-width: 330px; margin: 0; color: #fff; font-size: 31px; line-height: 1.12; font-weight: 700; letter-spacing: 0; }.center-access-brand > p { max-width: 355px; margin: 18px 0 0; color: #d3ead8; font-size: 15px; line-height: 1.62; }.center-access-signals { margin-top: auto; display: grid; gap: 15px; padding-top: 44px; color: #e0f1e4; font-size: 13px; font-weight: 700; }.center-access-signals span { display: flex; align-items: center; gap: 10px; }
+.center-access-workspace { padding: 58px 56px; }.center-access-kicker { display: flex; align-items: center; gap: 7px; color: #9a5c00; font-size: 11px; font-weight: 800; letter-spacing: 0; text-transform: uppercase; }.center-access-workspace h2 { margin: 12px 0 8px; color: #063f31; font-size: 31px; line-height: 1.12; font-weight: 700; letter-spacing: 0; }.center-access-intro { max-width: 560px; margin: 0 0 30px; color: #547063; font-size: 15px; line-height: 1.55; }.center-access-workspace .rounded-md.border.p-3 { margin-bottom: 20px; }
+@media (max-width: 760px) { .center-access-page { padding: 14px; }.center-access-shell { grid-template-columns: 1fr; }.center-access-brand { min-height: auto; padding: 32px 28px; }.server-brand { min-height: 105px; }.server-brand img { max-height: 130px; }.center-access-rule { margin: 20px 0 16px; }.center-access-signals { margin-top: 32px; padding-top: 0; }.center-access-workspace { padding: 36px 26px; }.center-access-workspace h2 { font-size: 28px; } }

@@ -83,7 +83,7 @@ export async function uploadExamResults(db: Database, databasePath: string, exam
     try {
         queueResultUploads(db, examId);
         const config = getLocalSyncConfig(db, databasePath);
-        if (!config.portal_url || !config.admin_email || !config.admin_password || !config.sync_token || !config.device_id) throw new Error('Portal connection credentials are incomplete. Update server activation settings.');
+        if (!config.portal_url || !config.sync_token || !config.device_id) throw new Error('Portal activation credentials are incomplete. Reactivate the server.');
         const base = new URL(config.portal_url);
         if (base.protocol !== 'https:' && !(base.protocol === 'http:' && ['localhost','127.0.0.1','[::1]'].includes(base.hostname))) throw new Error('Result uploads require HTTPS (except local development).');
         const url = `${config.portal_url.replace(/\/$/, '')}/api/offline/results`;
@@ -92,7 +92,7 @@ export async function uploadExamResults(db: Database, databasePath: string, exam
             try {
                 const response = await transport(url, {
                     method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30000),
-                    headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${config.sync_token}`, 'X-AlignEx-Admin-Email': config.admin_email, 'X-AlignEx-Admin-Password': config.admin_password, 'X-AlignEx-Device-Id': config.device_id },
+                    headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${config.sync_token}`, 'X-AlignEx-Device-Id': config.device_id },
                     body: job.payload,
                 });
                 const data = await response.json() as {receipt?: Receipt; message?: string};

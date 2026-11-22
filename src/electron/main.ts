@@ -1,13 +1,16 @@
 import type { BrowserWindow as BrowserWindowType } from 'electron';
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { randomBytes } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../services/config.js';
 import { startCenterServer, type CenterServer } from '../server/app.js';
+import { loginLocalAdmin } from '../server/activation-service.js';
+import { createKernelBridgeLicenseRuntime, kernelBridgeOptions, parseEntitlementPublicKeys } from '../server/kernelbridge-licensing.js';
 
 const require = createRequire(import.meta.url);
-const { app, BrowserWindow, ipcMain, shell } = require('electron') as typeof import('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, shell } = require('electron') as typeof import('electron');
 
 let mainWindow: BrowserWindowType | null = null;
 let centerServer: CenterServer | null = null;
@@ -21,6 +24,10 @@ if (process.platform === 'win32') {
 async function createWindow(): Promise<void> {
     const config = loadConfig();
     const storagePath = resolveStoragePath(config.storagePath, config.usesDefaultStoragePath);
+    const kernelBridgePublicKeys = parseEntitlementPublicKeys(config.kernelBridgeEntitlementPublicKeys ?? undefined);
+    const kernelBridgeCacheSigningKey = config.kernelBridgeApiUrl
+        ? getOrCreateKernelBridgeCacheSigningKey(app.getPath('userData'))
+        : null;
 
     centerServer = await startCenterServer({
         port: config.port,
@@ -31,6 +38,14 @@ async function createWindow(): Promise<void> {
         syncAdminEmail: config.syncAdminEmail,
         syncAdminPassword: config.syncAdminPassword,
         resultExportRootPath: app.getPath('downloads'),
+        createKernelBridgeLicenseRuntime: config.kernelBridgeApiUrl && kernelBridgeCacheSigningKey
+            ? (database) => createKernelBridgeLicenseRuntime(
+                database.connection,
+                safeStorage,
+                kernelBridgeOptions(config.kernelBridgeApiUrl!, kernelBridgePublicKeys, kernelBridgeCacheSigningKey),
+            )
+            : undefined,
+        requireKernelBridgeLicense: config.requireKernelBridgeLicense,
     });
 
     mainWindow = new BrowserWindow({
@@ -56,6 +71,30 @@ async function createWindow(): Promise<void> {
     } else {
         await mainWindow.loadFile(join(currentDir, '..', 'renderer', 'index.html'));
     }
+}
+
+function getOrCreateKernelBridgeCacheSigningKey(userDataPath: string): string {
+    if (!safeStorage.isEncryptionAvailable()) {
+        throw new Error('Windows secure storage is unavailable; KernelBridge licensing cannot securely initialize.');
+    }
+
+    const keyPath = join(userDataPath, 'kernelbridge-cache-signing-key.bin');
+    if (existsSync(keyPath)) {
+        const key = safeStorage.decryptString(readFileSync(keyPath));
+        if (!key) {
+            throw new Error('The saved KernelBridge cache signing key is empty.');
+        }
+
+        return key;
+    }
+
+    mkdirSync(userDataPath, { recursive: true });
+    const key = randomBytes(32).toString('base64url');
+    const temporaryPath = `${keyPath}.tmp`;
+    writeFileSync(temporaryPath, safeStorage.encryptString(key), { flag: 'wx' });
+    renameSync(temporaryPath, keyPath);
+
+    return key;
 }
 
 function resolveStoragePath(configuredStoragePath: string, usesDefaultStoragePath: boolean): string {
@@ -164,5 +203,45 @@ function registerIpcHandlers(): void {
         const errorMessage = await shell.openPath(folderPath);
 
         return errorMessage ? { success: false, message: errorMessage } : { success: true };
+    });
+
+    ipcMain.handle('alignex:uninstall-local-data', async (_event, password: unknown) => {
+        if (typeof password !== 'string' || password.length === 0 || !centerServer) {
+            return { success: false, message: 'A running server and local administrator password are required.' };
+        }
+
+        const database = centerServer.database;
+        const configPath = join(dirname(database.path), 'center-config.json');
+
+        try {
+            const admin = database.connection.prepare("SELECT email FROM local_users WHERE role = 'admin' AND status = 'active' ORDER BY created_at LIMIT 1").get() as { email: string } | undefined;
+
+            if (!admin) {
+                return { success: false, message: 'No active local administrator was found.' };
+            }
+
+            loginLocalAdmin(database.connection, admin.email, password);
+
+            const activeAttempt = database.connection
+                .prepare("SELECT COUNT(*) AS count FROM candidate_attempts WHERE status = 'active'")
+                .get() as { count: number };
+
+            if (Number(activeAttempt.count) > 0) {
+                return { success: false, message: 'Uninstall is blocked while a candidate exam is active. Close the exam first.' };
+            }
+
+            await centerServer.stop();
+            centerServer = null;
+
+            for (const path of [database.path, `${database.path}-wal`, `${database.path}-shm`, configPath]) {
+                rmSync(path, { force: true });
+            }
+
+            setTimeout(() => app.quit(), 100);
+
+            return { success: true, message: 'Local server data was deleted. The application will now close.' };
+        } catch (error) {
+            return { success: false, message: error instanceof Error ? error.message : 'Unable to delete local server data.' };
+        }
     });
 }

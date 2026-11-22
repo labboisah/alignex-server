@@ -6,9 +6,10 @@ import { Dashboard } from './pages/Dashboard';
 import { ImportedExamsPage } from './pages/ImportedExamsPage';
 import { ImportExamPage } from './pages/ImportExamPage';
 import { ResultsExportPage } from './pages/ResultsExportPage';
+import { ReadinessDrillPage } from './pages/ReadinessDrillPage';
 import { SettingsPage } from './pages/SettingsPage';
 
-export type AppPage = 'dashboard' | 'import-exam' | 'exams' | 'active-monitor' | 'results-export' | 'settings';
+export type AppPage = 'dashboard' | 'import-exam' | 'exams' | 'active-monitor' | 'results-export' | 'readiness' | 'settings';
 
 export default function App() {
     const [page, setPage] = useState<AppPage>('dashboard');
@@ -37,7 +38,7 @@ export default function App() {
 
     return (
         <ActivationGate>
-            {({ logout }) => (
+            {({ logout, localAdminSessionToken }) => (
                 <CenterAppShell currentPage={page} onLogout={logout} onNavigate={navigate}>
                     {page === 'import-exam' && <ImportExamPage onViewImportedExams={() => setPage('exams')} />}
                     {page === 'exams' && selectedExamId === null && <ImportedExamsPage onViewDetails={viewExamDetails} />}
@@ -52,8 +53,9 @@ export default function App() {
                     )}
                     {page === 'active-monitor' && <ActiveMonitorPage />}
                     {page === 'results-export' && <ResultsExportPage />}
+                    {page === 'readiness' && <ReadinessDrillPage localAdminSessionToken={localAdminSessionToken} />}
                     {page === 'settings' && <SettingsPage />}
-                    {page !== 'import-exam' && page !== 'exams' && page !== 'active-monitor' && page !== 'results-export' && page !== 'settings' && <Dashboard />}
+                    {page !== 'import-exam' && page !== 'exams' && page !== 'active-monitor' && page !== 'results-export' && page !== 'readiness' && page !== 'settings' && <Dashboard />}
                 </CenterAppShell>
             )}
         </ActivationGate>

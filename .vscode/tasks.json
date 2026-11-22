@@ -1,0 +1,20 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Package AlignEx Center Server 0.2.1",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/d",
+				"/c",
+				"set ALIGNEX_DEVELOPMENT_SIGNING=true && set ALIGNEX_CODE_SIGNING_THUMBPRINT=C5244EC0BB95F01D4F0C83C224C86306EE252960 && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\\package-win-unpacked.ps1"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		}
+	]
+}

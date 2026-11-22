@@ -16,6 +16,9 @@ export type OfflineServerConfig = {
     syncToken: string | null;
     syncAdminEmail: string | null;
     syncAdminPassword: string | null;
+    kernelBridgeApiUrl: string | null;
+    kernelBridgeEntitlementPublicKeys: string | null;
+    requireKernelBridgeLicense: boolean;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): OfflineServerConfig {
@@ -33,6 +36,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): OfflineServerC
         syncToken: valueOrNull(configEnv.ALIGNEX_SYNC_TOKEN),
         syncAdminEmail: valueOrNull(configEnv.ALIGNEX_SYNC_ADMIN_EMAIL),
         syncAdminPassword: valueOrNull(configEnv.ALIGNEX_SYNC_ADMIN_PASSWORD),
+        kernelBridgeApiUrl: valueOrNull(configEnv.KERNELBRIDGE_API_URL),
+        kernelBridgeEntitlementPublicKeys: valueOrNull(configEnv.KERNELBRIDGE_ENTITLEMENT_PUBLIC_KEYS),
+        requireKernelBridgeLicense: configEnv.ALIGNEX_REQUIRE_KERNELBRIDGE_LICENSE?.toLowerCase() === 'true',
     };
 }
 

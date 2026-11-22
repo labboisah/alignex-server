@@ -57,3 +57,39 @@ test('rejection leaves an existing traditional import untouched', t => {
     assert.throws(() => importExamPackage(connection, pkg), PackageValidationError);
     assert.deepEqual(connection.prepare('SELECT * FROM imported_exams').all(), before);
 });
+
+test('session-aware package imports with session records and keeps the flat flow as default', t => {
+    const connection = database(t);
+    const pkg = structuredClone(sample);
+    pkg.sessions = [
+        {
+            id: 'session-hall-a',
+            exam_id: pkg.manifest.exam_id,
+            session_name: 'Hall A - Morning',
+            hall_name: 'Hall A',
+            server_id: 'server-hall-a',
+            status: 'ready',
+            candidate_ids: [pkg.candidates[0].id],
+        },
+        {
+            id: 'session-hall-b',
+            exam_id: pkg.manifest.exam_id,
+            session_name: 'Hall B - Morning',
+            hall_name: 'Hall B',
+            server_id: 'server-hall-b',
+            status: 'ready',
+            candidate_ids: [pkg.candidates[1].id],
+        },
+    ];
+
+    const result = importExamPackage(connection, pkg);
+    assert.equal(result.exam_id, pkg.manifest.exam_id);
+    assert.equal(connection.prepare('SELECT count(*) AS count FROM exam_sessions').get().count, 2);
+    assert.deepEqual(
+        connection.prepare('SELECT session_name, hall_name, server_id FROM exam_sessions ORDER BY session_name').all(),
+        [
+            { session_name: 'Hall A - Morning', hall_name: 'Hall A', server_id: 'server-hall-a' },
+            { session_name: 'Hall B - Morning', hall_name: 'Hall B', server_id: 'server-hall-b' },
+        ],
+    );
+});

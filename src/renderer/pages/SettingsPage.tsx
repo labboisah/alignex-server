@@ -1,22 +1,37 @@
-import { AlertTriangle, CheckCircle2, Database, Download, Loader2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Database, Download, Loader2, RefreshCw, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useServerStatus } from '../hooks/useServerStatus';
 import { Button } from '../components/ui/button';
+import { ConfirmDialog } from '../components/ui/confirm-dialog';
 
 export function SettingsPage() {
     const { status, serverInfo, loading, error, refresh } = useServerStatus();
     const [activation, setActivation] = useState<ActivationStatus | null>(null);
+    const [activationError, setActivationError] = useState<string | null>(null);
     const [updateState, setUpdateState] = useState<UpdateCheckResult | null>(null);
     const [updateBusy, setUpdateBusy] = useState<UpdateAction | null>(null);
     const [updateMessage, setUpdateMessage] = useState<{ tone: 'success' | 'danger' | 'info'; text: string } | null>(null);
+    const [uninstallOpen, setUninstallOpen] = useState(false);
+    const [uninstallPassword, setUninstallPassword] = useState('');
+    const [uninstallBusy, setUninstallBusy] = useState(false);
 
     useEffect(() => {
-        void fetch('http://127.0.0.1:4080/api/app/state')
-            .then((response) => response.json())
-            .then((data: { status: ActivationStatus }) => setActivation(data.status))
-            .catch(() => setActivation(null));
+        void refreshActivation();
     }, []);
+
+    async function refreshActivation() {
+        try {
+            const response = await fetch('http://127.0.0.1:4080/api/app/state');
+            if (!response.ok) throw new Error(`License status returned ${response.status}.`);
+            const data = await response.json() as { status: ActivationStatus };
+            setActivation(data.status);
+            setActivationError(null);
+        } catch (caught) {
+            setActivation(null);
+            setActivationError(caught instanceof Error ? caught.message : 'Unable to load license status.');
+        }
+    }
 
     return (
         <div className="space-y-6">
@@ -28,7 +43,7 @@ export function SettingsPage() {
                     </p>
                 </div>
 
-                <Button onClick={() => void refresh()} variant="outline">
+                <Button onClick={() => { void refresh(); void refreshActivation(); }} variant="outline">
                     <RefreshCw className="h-4 w-4" />
                     Refresh
                 </Button>
@@ -94,12 +109,32 @@ export function SettingsPage() {
                         </div>
 
                         <div className="mt-5 grid gap-4">
+                            {activationError && <p className="text-sm text-danger" role="alert">{activationError}</p>}
+                            {activation && activation.state !== 'activated' && <p className="text-sm text-danger" role="alert">{activation.message}</p>}
                             <SettingRow label="Application State" value={activation?.state ?? 'Unavailable'} />
+                            <SettingRow label="Subscription Plan" value={activation?.plan?.name ?? 'Unavailable'} />
                             <SettingRow label="Device ID" value={activation?.device_id ?? 'Unavailable'} mono />
                             <SettingRow label="Organization" value={activation?.organization_name ?? '-'} />
                             <SettingRow label="Center" value={activation?.center_name ?? '-'} />
                             <SettingRow label="Portal URL" value={activation?.portal_url ?? '-'} mono />
                             <SettingRow label="Expires At" value={activation?.expires_at ? new Date(activation.expires_at).toLocaleString() : '-'} />
+                        </div>
+                        <div className="mt-6">
+                            <h3 className="font-semibold text-slateDark">Subscription entitlements</h3>
+                            <p className="mt-1 text-sm text-slate-500">Verified KernelBridge grants and limits for this installation.</p>
+                            {activation?.entitlements ? (
+                                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                    {Object.entries(activation.entitlements).sort(([a], [b]) => a.localeCompare(b)).map(([key, grant]) => (
+                                        <div key={key} className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm">
+                                            <span className="text-slateDark">{formatEntitlementName(key)}</span>
+                                            <span className={grant.enabled ? 'font-semibold text-success' : 'font-semibold text-slate-500'}>
+                                                {formatEntitlementValue(grant)}
+                                            </span>
+                                        </div>
+                                    ))}
+                                    {Object.keys(activation.entitlements).length === 0 && <p className="text-sm text-slate-500">No entitlements were included in the verified snapshot.</p>}
+                                </div>
+                            ) : <p className="mt-3 text-sm text-slate-500">Verified subscription entitlements are unavailable.</p>}
                         </div>
                     </section>
 
@@ -118,10 +153,72 @@ export function SettingsPage() {
                             <SettingRow label="Total Candidates" value={String(serverInfo.totalCandidatesCount)} />
                         </div>
                     </section>
+
+                    <section className="rounded-md border border-danger/30 bg-danger/5 p-5">
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                            <div className="flex items-start gap-3">
+                                <Trash2 className="mt-0.5 h-5 w-5 text-danger" />
+                                <div>
+                                    <h2 className="font-semibold text-slateDark">Uninstall Local Server</h2>
+                                    <p className="mt-1 max-w-2xl text-sm text-slate-600">
+                                        Delete this server's local SQLite database, activation, configuration, exams, candidates, answers, and local audit data. Portal records and the installed application will not be deleted.
+                                    </p>
+                                </div>
+                            </div>
+                            <Button onClick={() => setUninstallOpen(true)} variant="danger">
+                                <Trash2 className="h-4 w-4" />
+                                Uninstall Server
+                            </Button>
+                        </div>
+                    </section>
                 </div>
             )}
+
+            <ConfirmDialog
+                open={uninstallOpen}
+                title="Uninstall this local server?"
+                message="This permanently deletes the local SQLite database, activation, exams, candidates, answers, and audit data. It cannot be undone. The installed application remains and will need activation again."
+                confirmLabel="Uninstall Server"
+                confirmTone="danger"
+                loading={uninstallBusy}
+                onOpenChange={(open) => {
+                    setUninstallOpen(open);
+                    if (!open) setUninstallPassword('');
+                }}
+                onConfirm={() => void uninstallLocalData()}
+            >
+                <label className="block space-y-2">
+                    <span className="text-sm font-medium text-slateDark">Local admin password</span>
+                    <input
+                        autoFocus
+                        className="h-11 w-full rounded-md border border-border bg-white px-3 text-sm text-slateDark outline-none focus:border-danger focus:ring-2 focus:ring-danger/20"
+                        onChange={(event) => setUninstallPassword(event.target.value)}
+                        placeholder="Enter password to confirm"
+                        type="password"
+                        value={uninstallPassword}
+                    />
+                </label>
+            </ConfirmDialog>
         </div>
     );
+
+    async function uninstallLocalData() {
+        if (!uninstallPassword) {
+            setUpdateMessage({ tone: 'danger', text: 'Enter the local administrator password to continue.' });
+            return;
+        }
+
+        setUninstallBusy(true);
+        const result = await window.alignex?.uninstallLocalData(uninstallPassword);
+
+        if (!result?.success) {
+            setUninstallBusy(false);
+            setUpdateMessage({ tone: 'danger', text: result?.message ?? 'Unable to delete local server data.' });
+            return;
+        }
+
+        setUpdateMessage({ tone: 'success', text: result.message ?? 'Local server data deleted.' });
+    }
 
     async function checkUpdates() {
         setUpdateBusy('check');
@@ -183,12 +280,28 @@ export function SettingsPage() {
 
 type ActivationStatus = {
     state: string;
+    message: string;
     device_id: string;
     organization_name: string | null;
     center_name: string | null;
     portal_url: string | null;
     expires_at: string | null;
+    plan: { name: string | null };
+    entitlements: Record<string, { enabled: boolean; limit: number | string | null }> | null;
 };
+
+function formatEntitlementName(key: string): string {
+    return key.replace(/[_-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatEntitlementValue(grant: { enabled: boolean; limit: number | string | null }): string {
+    if (!grant.enabled) return 'Not included';
+    if (grant.limit === null || grant.limit === 'enabled') return 'Included';
+    if (grant.limit === 'unlimited') return 'Unlimited';
+    return typeof grant.limit === 'number' || /^\d+(\.\d+)?$/.test(grant.limit)
+        ? `Limit: ${grant.limit}`
+        : grant.limit;
+}
 
 type UpdateArtifact = 'server' | 'client_app';
 type UpdateAction = UpdateArtifact | 'check';

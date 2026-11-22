@@ -167,6 +167,29 @@ export function importExamPackage(connection: Database, payload: unknown): Impor
             );
         }
 
+        const insertSession = connection.prepare(`
+            INSERT INTO exam_sessions (
+                id, exam_id, session_name, hall_name, server_id, status,
+                opened_at, closed_at, candidate_ids_json, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const session of examPackage.sessions ?? []) {
+            insertSession.run(
+                session.id,
+                importedExamId,
+                session.session_name,
+                session.hall_name ?? null,
+                session.server_id ?? null,
+                session.status ?? 'ready',
+                session.opened_at ?? null,
+                session.closed_at ?? null,
+                JSON.stringify(session.candidate_ids ?? []),
+                now,
+                now,
+            );
+        }
+
         const insertAttempt = connection.prepare(`
             INSERT INTO candidate_attempts (
                 id, exam_id, candidate_id, started_at, submitted_at, ip_address,
@@ -461,6 +484,7 @@ function validateExamPackage(payload: unknown): ExamPackage {
     const options = payload.options;
     const candidates = payload.candidates;
     const papers = payload.papers;
+    const sessions = payload.sessions;
 
     if (!isRecord(manifest)) {
         errors.push('manifest is required and must be an object.');
@@ -470,6 +494,9 @@ function validateExamPackage(payload: unknown): ExamPackage {
 
     if (!Array.isArray(subjects) && !Array.isArray(units)) {
         errors.push('subjects or units is required and must be an array.');
+    }
+    if (sessions !== undefined && !Array.isArray(sessions)) {
+        errors.push('sessions must be an array when provided.');
     }
     validateArray('questions', questions, errors);
     validateArray('options', options, errors);
@@ -487,6 +514,9 @@ function validateExamPackage(payload: unknown): ExamPackage {
     validateOptions(typedPackage.options, typedPackage.questions, errors);
     validateCandidates(typedPackage.candidates, typedPackage.manifest.exam_id, errors);
     validatePapers(typedPackage.papers, typedPackage.candidates, typedPackage.questions, typedPackage.options, errors);
+    if (Array.isArray(typedPackage.sessions)) {
+        validateSessions(typedPackage.sessions, typedPackage.candidates, typedPackage.manifest.exam_id, errors);
+    }
 
     if (typedPackage.manifest.total_questions !== typedPackage.questions.length) {
         errors.push('manifest.total_questions must match questions.length.');
@@ -625,6 +655,38 @@ function validateCandidates(candidates: Candidate[], examId: string, errors: str
         if (!isNonEmptyString(candidate.access_code_hash)) errors.push(`candidates[${index}].access_code_hash is required.`);
         if (candidate.group_name !== null && typeof candidate.group_name !== 'string') {
             errors.push(`candidates[${index}].group_name must be string or null.`);
+        }
+    });
+}
+
+function validateSessions(sessions: Array<{ id: string; exam_id: string; session_name: string; hall_name?: string | null; server_id?: string | null; status?: string | null; opened_at?: string | null; closed_at?: string | null; candidate_ids?: string[] }>, candidates: Candidate[], examId: string, errors: string[]): void {
+    const candidateIds = new Set(candidates.map((candidate) => candidate.id));
+
+    sessions.forEach((session, index) => {
+        if (!isNonEmptyString(session.id)) {
+            errors.push(`sessions[${index}].id is required.`);
+        }
+        if (session.exam_id !== examId) {
+            errors.push(`sessions[${index}].exam_id must match manifest.exam_id.`);
+        }
+        if (!isNonEmptyString(session.session_name)) {
+            errors.push(`sessions[${index}].session_name is required.`);
+        }
+        if (session.hall_name !== undefined && session.hall_name !== null && typeof session.hall_name !== 'string') {
+            errors.push(`sessions[${index}].hall_name must be string or null.`);
+        }
+        if (session.server_id !== undefined && session.server_id !== null && typeof session.server_id !== 'string') {
+            errors.push(`sessions[${index}].server_id must be string or null.`);
+        }
+        if (session.candidate_ids !== undefined && !Array.isArray(session.candidate_ids)) {
+            errors.push(`sessions[${index}].candidate_ids must be an array when provided.`);
+        }
+        if (Array.isArray(session.candidate_ids)) {
+            for (const candidateId of session.candidate_ids) {
+                if (!candidateIds.has(candidateId)) {
+                    errors.push(`sessions[${index}].candidate_ids contains an unknown candidate id: ${candidateId}.`);
+                }
+            }
         }
     });
 }

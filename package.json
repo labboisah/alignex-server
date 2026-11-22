@@ -1,6 +1,6 @@
 {
   "name": "@alignex/offline-server",
-  "version": "0.1.5",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "main": "dist/electron/main.js",
@@ -8,14 +8,19 @@
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite --host 127.0.0.1 --port 5174",
     "dev:electron": "npm run build:main && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5174 electron dist/electron/main.js",
+    "prebuild:main": "npm --prefix ../kernelbridge-license/packages/typescript run build",
     "build": "npm run build:main && npm run build:renderer",
     "build:main": "tsc -p tsconfig.node.json",
     "build:renderer": "vite build",
-    "package:win-unpacked": "powershell -ExecutionPolicy Bypass -File scripts/package-win-unpacked.ps1",
+    "generate:icon": "node scripts/generate-app-icon.mjs",
+    "package:win-unpacked": "npm run generate:icon && powershell -ExecutionPolicy Bypass -File scripts/package-win-unpacked.ps1",
     "start": "electron dist/electron/main.js"
   },
   "dependencies": {
+    "@kernelbridge/licensing-client-typescript": "file:../kernelbridge-license/packages/typescript",
     "@radix-ui/react-slot": "^1.1.0",
+    "@types/archiver": "^8.0.0",
+    "archiver": "^8.0.0",
     "better-sqlite3": "^11.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

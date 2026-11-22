@@ -34,6 +34,14 @@ export function startExam(connection: Database, examId: string): ExamSummary {
             throw new ExamControlError(`Another exam is already active: ${activeExam.title}.`, 409);
         }
 
+        const activeReadinessDrill = connection.prepare("SELECT name FROM readiness_drills WHERE status IN ('ready', 'running') LIMIT 1").get() as
+            | { name: string }
+            | undefined;
+
+        if (activeReadinessDrill) {
+            throw new ExamControlError(`Autoboot readiness drill "${activeReadinessDrill.name}" must be completed or cancelled before starting an official exam.`, 409);
+        }
+
         const now = new Date().toISOString();
 
         connection.prepare(`

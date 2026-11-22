@@ -5,6 +5,7 @@ import {
     LayoutDashboard,
     LogOut,
     MonitorUp,
+    ShieldCheck,
     Settings,
     Upload,
     Wifi,
@@ -23,6 +24,7 @@ const navItems = [
     { id: 'exams', label: 'Exams', icon: Database, feature: 'offline_delivery' },
     { id: 'active-monitor', label: 'Active Monitor', icon: MonitorUp, feature: 'offline_delivery' },
     { id: 'results-export', label: 'Results Export', icon: Upload, feature: 'result_package_export' },
+    { id: 'readiness', label: 'Autoboot Readiness', icon: ShieldCheck },
     { id: 'settings', label: 'Settings', icon: Settings },
 ] satisfies Array<{ id: AppPage; label: string; icon: LucideIcon; feature?: string }>;
 
@@ -43,7 +45,7 @@ export function CenterAppShell({ children, currentPage, onNavigate, onLogout }: 
             <aside className="flex w-72 shrink-0 flex-col border-r border-border bg-white">
                 <div className="border-b border-border px-6 py-5">
                     <div className="flex items-center gap-3">
-                        <img src="./images/logo.png" alt="AlignEx" className="h-11 w-11 object-contain" />
+                        <img src="./images/logo.png" alt="AlignEx Offline Server" className="h-14 w-14 object-contain" />
                         <div>
                             <div className="text-lg font-semibold text-slateDark">AlignEx Center</div>
                             <div className="mt-1 text-sm text-slate-500">Offline Exam Server</div>

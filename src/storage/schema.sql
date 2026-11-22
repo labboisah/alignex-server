@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS license_activations (
     center_id TEXT,
     status TEXT NOT NULL DEFAULT 'activated' CHECK (status IN ('activated', 'expired', 'revoked', 'maintenance')),
     activated_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
+    expires_at TEXT,
     raw_payload TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Loader2, Power, Wrench } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, LockKeyhole, MonitorCheck, Power, ServerCog, ShieldCheck, Wrench } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
@@ -32,11 +32,13 @@ type ActivationStatus = {
 
 type ActivationGateControls = {
     logout: () => void;
+    localAdminSessionToken: string;
 };
 
 export function ActivationGate({ children }: { children: ReactNode | ((controls: ActivationGateControls) => ReactNode) }) {
     const [status, setStatus] = useState<ActivationStatus | null>(null);
     const [authenticated, setAuthenticated] = useState(false);
+    const [localAdminSessionToken, setLocalAdminSessionToken] = useState('');
     const [mode, setMode] = useState<'activation' | 'login'>('activation');
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
@@ -72,7 +74,7 @@ export function ActivationGate({ children }: { children: ReactNode | ((controls:
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
             });
-            const data = (await response.json()) as { status?: ActivationStatus; message?: string; success?: boolean };
+            const data = (await response.json()) as { status?: ActivationStatus; message?: string; success?: boolean; session_token?: string };
 
             if (!response.ok) {
                 throw new Error(data.message ?? 'Request failed.');
@@ -97,6 +99,9 @@ export function ActivationGate({ children }: { children: ReactNode | ((controls:
 
         if (result?.success) {
             setAuthenticated(true);
+            if (typeof result.session_token === 'string') {
+                setLocalAdminSessionToken(result.session_token);
+            }
         }
     }
 
@@ -117,6 +122,7 @@ export function ActivationGate({ children }: { children: ReactNode | ((controls:
             }
 
             setAuthenticated(false);
+            setLocalAdminSessionToken('');
             setStatus(data.status ?? null);
             setMode('activation');
             return true;
@@ -143,34 +149,43 @@ export function ActivationGate({ children }: { children: ReactNode | ((controls:
             setError(null);
         };
 
-        return <>{typeof children === 'function' ? children({ logout }) : children}</>;
+        return <>{typeof children === 'function' ? children({ logout, localAdminSessionToken }) : children}</>;
     }
 
     return (
         <Centered>
-            <div className="w-full max-w-md space-y-4">
-                <div className="flex flex-col items-center text-center">
-                    <img src="./images/logo.png" alt="AlignEx" className="h-14 w-14 object-contain" />
-                    <div className="mt-3">
-                        <h1 className="text-xl font-semibold text-slateDark">AlignEx Center Server</h1>
-                        <p className="mt-1 text-sm text-slate-500">Secure offline CBT delivery.</p>
+            <div className="center-access-shell">
+                <section className="center-access-brand" aria-label="AlignEx Offline Server">
+                    <ServerBrand />
+                    <div className="center-access-rule" />
+                    <h1>Reliable local exam delivery.</h1>
+                    <p>Operate examinations from this center workstation with the local service, audit trail, and package controls kept on the private network.</p>
+                    <div className="center-access-signals">
+                        <span><ShieldCheck size={18} />Private center data</span>
+                        <span><MonitorCheck size={18} />Local candidate delivery</span>
+                        <span><ServerCog size={18} />Server-managed readiness</span>
                     </div>
-                </div>
+                </section>
+                <section className="center-access-workspace">
+                    <div className="center-access-kicker"><LockKeyhole size={15} />Local administration</div>
+                    <h2>{mode === 'activation' ? 'Activate this Center Server' : 'Sign in to Center Server'}</h2>
+                    <p className="center-access-intro">{mode === 'activation' ? 'Link this workstation to the assigned organization before importing or delivering an examination.' : 'Use the local administrator account configured during activation.'}</p>
 
-                {error && (
-                    <Alert className="border-danger/30 bg-danger/5">
-                        <AlertTriangle className="h-4 w-4 text-danger" />
-                        <AlertTitle>Action failed</AlertTitle>
-                        <AlertDescription>{error}</AlertDescription>
-                    </Alert>
-                )}
+                    {error && (
+                        <Alert className="mb-5 border-danger/30 bg-danger/5">
+                            <AlertTriangle className="h-4 w-4 text-danger" />
+                            <AlertTitle>Action failed</AlertTitle>
+                            <AlertDescription>{error}</AlertDescription>
+                        </Alert>
+                    )}
 
-                {status && status.state !== 'not_configured' && (
-                    <LicenseBanner status={status} busy={busy} onDeactivate={handleDeactivate} onRefresh={() => void refreshState()} />
-                )}
+                    {status && status.state !== 'not_configured' && (
+                        <LicenseBanner status={status} busy={busy} onDeactivate={handleDeactivate} onRefresh={() => void refreshState()} />
+                    )}
 
-                {mode === 'activation' && <ActivationForm busy={busy} onSubmit={(body) => void post('/api/app/activate', body)} />}
-                {mode === 'login' && <LocalLogin busy={busy} defaultEmail={status?.admin_email ?? ''} onSubmit={(body) => void handleLogin(body)} />}
+                    {mode === 'activation' && <ActivationForm busy={busy} onSubmit={(body) => void post('/api/app/activate', body)} />}
+                    {mode === 'login' && <LocalLogin busy={busy} defaultEmail={status?.admin_email ?? ''} onSubmit={(body) => void handleLogin(body)} />}
+                </section>
             </div>
         </Centered>
     );
@@ -178,7 +193,7 @@ export function ActivationGate({ children }: { children: ReactNode | ((controls:
 
 function ActivationForm({ busy, onSubmit }: { busy: boolean; onSubmit: (body: Record<string, string>) => void }) {
     return (
-        <FormCard title="Activate Center Server" description="Enter your portal URL, activation code, and admin credentials.">
+        <FormCard title="Activation details" description="Use credentials issued for this center and its assigned organization.">
             <form
                 className="space-y-4"
                 onSubmit={(event: FormEvent<HTMLFormElement>) => {
@@ -203,7 +218,7 @@ function ActivationForm({ busy, onSubmit }: { busy: boolean; onSubmit: (body: Re
 
 function LocalLogin({ busy, defaultEmail, onSubmit }: { busy: boolean; defaultEmail: string; onSubmit: (body: Record<string, string>) => void }) {
     return (
-        <FormCard title="Local Admin Login" description="Use the admin account created during activation.">
+        <FormCard title="Local administrator" description="This sign-in does not leave the center workstation.">
             <form
                 className="space-y-4"
                 onSubmit={(event) => {
@@ -331,7 +346,11 @@ function Panel({ icon, title, description }: { icon: ReactNode; title: string; d
 }
 
 function Centered({ children }: { children: ReactNode }) {
-    return <main className="flex min-h-screen items-center justify-center bg-lightBackground p-6">{children}</main>;
+    return <main className="center-access-page">{children}</main>;
+}
+
+function ServerBrand() {
+    return <div className="server-brand"><img src="./images/logo.png" alt="AlignEx Offline Server" /></div>;
 }
 
 function formData(form: HTMLFormElement): Record<string, string> {

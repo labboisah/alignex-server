@@ -53,12 +53,12 @@ export async function checkForUpdates(connection: SqliteDatabase, databasePath: 
     const config = getLocalSyncConfig(connection, databasePath);
     const portalUrl = normalizePortalUrl(config.portal_url);
 
-    if (!config.admin_email || !config.admin_password) {
-        throw new UpdateError('Portal admin credentials are missing. Reactivate the server to enable updates.', 422);
+    if (!config.sync_token || !config.device_id) {
+        throw new UpdateError('Portal activation token is missing. Reactivate the server to enable updates.', 422);
     }
 
     const response = await fetch(`${portalUrl}/api/offline/updates`, {
-        headers: syncHeaders(config.admin_email, config.admin_password, config.sync_token, config.device_id),
+        headers: syncHeaders(config.sync_token, config.device_id),
     });
     const data = (await response.json().catch(() => ({}))) as { updates?: Partial<Record<UpdateArtifact, PortalUpdateArtifact | null>>; message?: string };
 
@@ -85,12 +85,12 @@ export async function downloadUpdate(connection: SqliteDatabase, databasePath: s
 
     const config = getLocalSyncConfig(connection, databasePath);
 
-    if (!config.admin_email || !config.admin_password) {
-        throw new UpdateError('Portal admin credentials are missing. Reactivate the server to enable updates.', 422);
+    if (!config.sync_token || !config.device_id) {
+        throw new UpdateError('Portal activation token is missing. Reactivate the server to enable updates.', 422);
     }
 
     const response = await fetch(metadata.download_url, {
-        headers: syncHeaders(config.admin_email, config.admin_password, config.sync_token, config.device_id),
+        headers: syncHeaders(config.sync_token, config.device_id),
     });
 
     if (!response.ok) {
@@ -135,21 +135,12 @@ export async function downloadUpdate(connection: SqliteDatabase, databasePath: s
     };
 }
 
-function syncHeaders(adminEmail: string, adminPassword: string, syncToken: string | null, deviceId: string | null): Record<string, string> {
+function syncHeaders(syncToken: string, deviceId: string): Record<string, string> {
     const headers: Record<string, string> = {
         Accept: 'application/json',
-        'X-AlignEx-Admin-Email': adminEmail,
-        'X-AlignEx-Admin-Password': adminPassword,
+        Authorization: `Bearer ${syncToken}`,
+        'X-AlignEx-Device-Id': deviceId,
     };
-
-    if (syncToken) {
-        headers.Authorization = `Bearer ${syncToken}`;
-    }
-
-    if (deviceId) {
-        headers['X-AlignEx-Device-Id'] = deviceId;
-    }
-
     return headers;
 }
 

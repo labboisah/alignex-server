@@ -2,7 +2,8 @@ import type DatabaseConstructor from 'better-sqlite3';
 import { createHash, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { normalizePlanFeatures, type PlanFeatures, type PlanSummary } from './plan-features.js';
+import { normalizePlanFeatures, verifiedLicenseProjection, type LicenseEntitlements, type PlanFeatures, type PlanSummary } from './plan-features.js';
+import type { KernelBridgeLicenseRuntime } from './kernelbridge-licensing.js';
 
 type SqliteDatabase = InstanceType<typeof DatabaseConstructor>;
 
@@ -21,13 +22,13 @@ export type ActivationStatus = {
     days_remaining: number | null;
     plan: PlanSummary;
     plan_features: PlanFeatures;
+    entitlements: LicenseEntitlements | null;
     message: string;
 };
 
 export type LocalSyncConfig = {
     portal_url: string | null;
     admin_email: string | null;
-    admin_password: string | null;
     sync_token: string | null;
     center_id: string | null;
     device_id: string | null;
@@ -71,7 +72,7 @@ export function getActivationStatus(connection: SqliteDatabase, databasePath: st
         return status('maintenance', deviceId, license, config, 'This center server is in maintenance mode.');
     }
 
-    if (new Date(license.expires_at).getTime() <= Date.now()) {
+    if (license.expires_at && new Date(license.expires_at).getTime() <= Date.now()) {
         updateLicenseStatus(connection, license.id, 'expired');
         return status('expired', deviceId, { ...license, status: 'expired' }, config, 'This license has expired.');
     }
@@ -89,7 +90,10 @@ export async function activateOnline(
         admin_password: string;
         center_name?: string;
         organization_name?: string;
+        installation_uuid?: string;
     },
+    kernelBridgeLicense?: KernelBridgeLicenseRuntime,
+    requireKernelBridgeLicense = false,
 ): Promise<ActivationStatus> {
     validateSetupInput(input);
     const deviceId = ensureDeviceId(connection);
@@ -103,6 +107,7 @@ export async function activateOnline(
             body: JSON.stringify({
                 activation_code: input.activation_code.trim(),
                 device_id: deviceId,
+                ...(input.installation_uuid ? { installation_uuid: input.installation_uuid } : {}),
                 admin_email: input.admin_email.trim(),
                 admin_password: input.admin_password,
                 center_name: input.center_name?.trim() || null,
@@ -124,8 +129,40 @@ export async function activateOnline(
         throw new ActivationError('Unable to reach the portal activation service.', 503);
     }
 
+    const kernelBridgeActivation = remotePayload.kernelbridge;
+    if (kernelBridgeActivation?.activation_code) {
+        if (!kernelBridgeLicense || !input.installation_uuid) {
+            throw new ActivationError('This AlignEx Server is not configured to complete KernelBridge installation activation.', 503);
+        }
+        if (kernelBridgeActivation.installation_uuid !== input.installation_uuid) {
+            throw new ActivationError('The AlignEx Platform returned a KernelBridge activation code for a different server installation.', 403);
+        }
+
+        let state;
+        try {
+            state = await kernelBridgeLicense.activateWithCode(kernelBridgeActivation.activation_code, input.center_name);
+        } catch (error) {
+            throw new ActivationError(error instanceof Error ? error.message : 'KernelBridge installation activation failed.', 503);
+        }
+
+        if (state.productCode !== 'ALIGNEX'
+            || state.installationIdentifier !== input.installation_uuid
+            || !['active', 'trial', 'grace'].includes(state.status)) {
+            throw new ActivationError('KernelBridge returned a license that is not active for this AlignEx Server installation.', 403);
+        }
+
+        const projection = verifiedLicenseProjection(state);
+        remotePayload = {
+            ...remotePayload,
+            expires_at: state.expiresAt,
+            plan: projection.plan ?? remotePayload.plan,
+            plan_features: projection.features,
+        };
+    } else if (requireKernelBridgeLicense) {
+        throw new ActivationError('The AlignEx Platform did not provide a KernelBridge installation code. Link an active AlignEx license and retry.', 403);
+    }
+
     const activatedAt = new Date().toISOString();
-    const expiresAt = oneYearFromNow();
     const payload: LicensePayload = {
         license_key: String(remotePayload.license_key ?? input.activation_code.trim()),
         organization_name: String(remotePayload.organization_name ?? input.organization_name ?? 'Activated Organization'),
@@ -133,8 +170,10 @@ export async function activateOnline(
         center_id: String(remotePayload.center_id ?? ''),
         sync_token: remotePayload.sync_token ? String(remotePayload.sync_token) : null,
         activated_at: activatedAt,
-        expires_at: String(remotePayload.expires_at ?? expiresAt),
+        expires_at: remotePayload.expires_at === null ? null : String(remotePayload.expires_at ?? oneYearFromNow()),
         status: 'activated',
+        ...(remotePayload.plan ? { plan: remotePayload.plan } : {}),
+        ...(remotePayload.plan_features ? { plan_features: remotePayload.plan_features } : {}),
     };
 
     const adminEmail = input.admin_email.trim();
@@ -196,7 +235,12 @@ export function loginLocalAdmin(connection: SqliteDatabase, email: string, passw
     return { success: true, admin: { name: admin.name, email: admin.email } };
 }
 
-export async function deactivateLocal(connection: SqliteDatabase, databasePath: string, password: string): Promise<ActivationStatus> {
+export async function deactivateLocal(
+    connection: SqliteDatabase,
+    databasePath: string,
+    password: string,
+    deactivateKernelBridge?: () => Promise<void>,
+): Promise<ActivationStatus> {
     const config = readLocalConfig(databasePath);
     const license = getLatestLicense(connection);
 
@@ -213,6 +257,8 @@ export async function deactivateLocal(connection: SqliteDatabase, databasePath: 
     if (Number(activeAttempt.count) > 0) {
         throw new ActivationError('Deactivate is blocked while a candidate exam is active. Close the exam before deactivating this server.', 409);
     }
+
+    await deactivateKernelBridge?.();
 
     const portalUrl = normalizeUrl(config.portal_url ?? '');
     const response = await fetch(`${portalUrl}/api/offline/deactivate`, {
@@ -250,7 +296,6 @@ export function getLocalSyncConfig(connection: SqliteDatabase, databasePath: str
     return {
         portal_url: config?.portal_url ?? null,
         admin_email: config?.admin_email ?? null,
-        admin_password: config?.admin_password ?? null,
         sync_token: config?.sync_token ?? license?.license_key ?? null,
         center_id: license?.center_id ?? config?.center_id ?? null,
         device_id: config?.device_id ?? ensureDeviceId(connection),
@@ -266,10 +311,15 @@ type LicensePayload = {
     portal_url?: string | null;
     sync_token?: string | null;
     activated_at?: string;
-    expires_at?: string;
+    expires_at?: string | null;
     status?: 'activated' | 'expired' | 'revoked' | 'maintenance';
     plan?: PlanSummary;
     plan_features?: Partial<PlanFeatures>;
+    kernelbridge?: {
+        activation_code?: string;
+        installation_uuid?: string;
+        expires_at?: string;
+    } | null;
 };
 
 type LicenseRow = {
@@ -281,7 +331,7 @@ type LicenseRow = {
     center_id: string | null;
     status: 'activated' | 'expired' | 'revoked' | 'maintenance';
     activated_at: string;
-    expires_at: string;
+    expires_at: string | null;
     raw_payload: string | null;
 };
 
@@ -290,7 +340,6 @@ type LocalConfigFile = {
     device_id: string;
     portal_url: string | null;
     admin_email: string | null;
-    admin_password: string | null;
     sync_token: string | null;
     center_id: string | null;
     written_at: string;
@@ -315,7 +364,7 @@ function saveActivation(connection: SqliteDatabase, databasePath: string, device
             payload.center_id ?? null,
             payload.status ?? 'activated',
             payload.activated_at ?? now,
-            payload.expires_at ?? oneYearFromNow(),
+            payload.expires_at === undefined ? oneYearFromNow() : payload.expires_at,
             JSON.stringify(payload),
             now,
             now,
@@ -326,7 +375,6 @@ function saveActivation(connection: SqliteDatabase, databasePath: string, device
         device_id: deviceId,
         portal_url: portalUrl ?? payload.portal_url ?? null,
         admin_email: adminEmail.trim(),
-        admin_password: adminPassword,
         sync_token: payload.sync_token ?? null,
         center_id: payload.center_id ?? null,
         written_at: now,
@@ -415,6 +463,7 @@ function status(state: ApplicationState, deviceId: string, license: LicenseRow |
         days_remaining: daysRemaining,
         plan,
         plan_features: normalizePlanFeatures(payload?.plan_features, true),
+        entitlements: null,
         message,
     };
 }
@@ -454,8 +503,13 @@ function readLocalConfig(databasePath: string): LocalConfigFile | null {
     }
 
     try {
-        const parsed = JSON.parse(readFileSync(path, 'utf8')) as LocalConfigFile;
-        return parsed.version === 1 ? parsed : null;
+        const parsed = JSON.parse(readFileSync(path, 'utf8')) as LocalConfigFile & { admin_password?: unknown };
+        if (parsed.version !== 1) return null;
+        if ('admin_password' in parsed) {
+            delete parsed.admin_password;
+            writeLocalConfig(databasePath, parsed);
+        }
+        return parsed;
     } catch {
         return null;
     }

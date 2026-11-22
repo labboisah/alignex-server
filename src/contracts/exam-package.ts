@@ -2,10 +2,23 @@ export type ExamPackage = {
     manifest: ExamManifest;
     subjects?: ExamUnit[];
     units?: ExamUnit[];
+    sessions?: ExamSession[];
     questions: Question[];
     options: QuestionOption[];
     candidates: Candidate[];
     papers: CandidatePaper[];
+};
+
+export type ExamSession = {
+    id: string;
+    exam_id: string;
+    session_name: string;
+    hall_name?: string | null;
+    server_id?: string | null;
+    status?: string | null;
+    opened_at?: string | null;
+    closed_at?: string | null;
+    candidate_ids?: string[];
 };
 
 export type ExamManifest = {

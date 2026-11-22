@@ -1,6 +1,6 @@
 import type { Server as SocketServer } from 'socket.io';
 import type { CenterDatabase } from './database.js';
-import { readLatestPlanFeatures, readLatestPlanSummary } from './plan-features.js';
+import { allPlanFeatures, readLatestPlanFeatures, readLatestPlanSummary, type PlanFeatures, type PlanSummary } from './plan-features.js';
 import { detectLanIpAddress } from './network.js';
 import type { CenterServerStatus, ServerInfo } from './types.js';
 
@@ -16,6 +16,7 @@ export class StatusService {
     private readonly startedAt: string;
     private socketServer: SocketServer | null = null;
     private connectedCandidateCountProvider: (() => number) | null = null;
+    private licenseProjection: { plan: PlanSummary | null; features: PlanFeatures } | null = null;
 
     constructor(options: StatusServiceOptions) {
         this.database = options.database;
@@ -29,6 +30,10 @@ export class StatusService {
 
     setConnectedCandidateCountProvider(provider: () => number): void {
         this.connectedCandidateCountProvider = provider;
+    }
+
+    setLicenseProjection(projection: { plan: PlanSummary | null; features: PlanFeatures } | null, failClosed = false): void {
+        this.licenseProjection = projection ?? (failClosed ? { plan: null, features: allPlanFeatures(false) } : null);
     }
 
     getStatus(): CenterServerStatus {
@@ -51,8 +56,8 @@ export class StatusService {
                 path: this.database.path,
                 walEnabled: this.database.walEnabled,
             },
-            plan: readLatestPlanSummary(this.database.connection),
-            plan_features: readLatestPlanFeatures(this.database.connection),
+            plan: this.licenseProjection?.plan ?? readLatestPlanSummary(this.database.connection),
+            plan_features: this.licenseProjection?.features ?? readLatestPlanFeatures(this.database.connection),
             startedAt: this.startedAt,
         };
     }
@@ -64,8 +69,8 @@ export class StatusService {
             importedExamsCount: this.countImportedExams(),
             activeExamCount: this.countImportedExamsByStatus(['active']),
             totalCandidatesCount: this.countCandidates(),
-            plan: readLatestPlanSummary(this.database.connection),
-            plan_features: readLatestPlanFeatures(this.database.connection),
+            plan: this.licenseProjection?.plan ?? readLatestPlanSummary(this.database.connection),
+            plan_features: this.licenseProjection?.features ?? readLatestPlanFeatures(this.database.connection),
         };
     }
 

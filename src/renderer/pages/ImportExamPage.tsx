@@ -33,6 +33,7 @@ export function ImportExamPage({ onViewImportedExams }: { onViewImportedExams: (
     const [summary, setSummary] = useState<ImportSummary | null>(null);
     const [toast, setToast] = useState<ToastState | null>(null);
     const [examCode, setExamCode] = useState('');
+    const [adminPassword, setAdminPassword] = useState('');
 
     const importing = stage === 'validating' || stage === 'importing';
 
@@ -59,6 +60,7 @@ export function ImportExamPage({ onViewImportedExams }: { onViewImportedExams: (
                 },
                 body: JSON.stringify({
                     exam_code: examCode.trim(),
+                    admin_password: adminPassword,
                 }),
             });
 
@@ -136,6 +138,26 @@ export function ImportExamPage({ onViewImportedExams }: { onViewImportedExams: (
                                     value={examCode}
                                 />
                             </div>
+                        </div>
+
+                        <div>
+                            <label className="text-sm font-semibold text-slateDark" htmlFor="sync-admin-password">
+                                Portal admin password
+                            </label>
+                            <input
+                                className="mt-2 h-11 w-full rounded-md border border-border bg-white px-3 text-sm text-slateDark outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/15"
+                                id="sync-admin-password"
+                                onChange={(event) => setAdminPassword(event.target.value)}
+                                onKeyDown={(event) => {
+                                    if (event.key === 'Enter') {
+                                        void importPackageByCode();
+                                    }
+                                }}
+                                placeholder="Enter portal admin password"
+                                type="password"
+                                value={adminPassword}
+                            />
+                            <p className="mt-2 text-xs text-slate-500">Used for this fetch only and not saved on the center server.</p>
                         </div>
 
                         <div className="flex flex-wrap gap-3">

@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3';
+import type { LicenseState } from '@kernelbridge/licensing-client-typescript';
 
 export type PlanFeatureKey =
     | 'online_delivery'
@@ -37,6 +38,56 @@ export type PlanSummary = {
 };
 
 export type PlanFeatures = Record<PlanFeatureKey, boolean>;
+
+type EntitlementGrant = { enabled: boolean; limit: number | string | null };
+export type LicenseEntitlements = Record<string, EntitlementGrant>;
+
+const entitlementAliases: Partial<Record<PlanFeatureKey, string[]>> = {
+    online_delivery: ['delivery_online'],
+    offline_delivery: ['delivery_offline'],
+    exam_package_import: ['delivery_offline'],
+    result_package_export: ['delivery_offline'],
+    sms_notifications: ['sms_enabled'],
+    offline_activation: ['max_server_installations'],
+};
+
+export function entitlementKeyForFeature(feature: PlanFeatureKey, entitlements: LicenseEntitlements): string {
+    return [feature, ...(entitlementAliases[feature] ?? [])].find((key) => key in entitlements) ?? feature;
+}
+
+export function planFeaturesFromEntitlements(entitlements: LicenseEntitlements): PlanFeatures {
+    return Object.fromEntries(featureKeys.map((feature) => {
+        const key = entitlementKeyForFeature(feature, entitlements);
+        const grant = entitlements[key];
+        const allowed = grant?.enabled === true && (key !== 'max_server_installations'
+            || grant.limit === 'unlimited'
+            || (grant.limit !== null && Number(grant.limit) > 0));
+        return [feature, allowed];
+    })) as PlanFeatures;
+}
+
+export function verifiedLicenseProjection(state: LicenseState): { plan: PlanSummary | null; features: PlanFeatures; entitlements: LicenseEntitlements } {
+    let plan: PlanSummary | null = null;
+    if (state.signedEntitlementPayload) {
+        const claims: unknown = JSON.parse(state.signedEntitlementPayload);
+        if (!claims || typeof claims !== 'object' || Array.isArray(claims)) {
+            throw new Error('The verified KernelBridge entitlement payload is malformed.');
+        }
+        const value = (claims as Record<string, unknown>).plan;
+        if (value !== undefined) {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) {
+                throw new Error('The verified KernelBridge plan is malformed.');
+            }
+            const record = value as Record<string, unknown>;
+            if (typeof record.uuid !== 'string' || typeof record.name !== 'string') {
+                throw new Error('The verified KernelBridge plan is malformed.');
+            }
+            plan = { id: record.uuid, slug: null, name: record.name };
+        }
+    }
+
+    return { plan, features: planFeaturesFromEntitlements(state.entitlements), entitlements: state.entitlements };
+}
 
 export class PlanFeatureError extends Error {
     constructor(

@@ -40,6 +40,8 @@ cd offline-server
 npm install
 ```
 
+The KernelBridge TypeScript SDK is a sibling workspace dependency at `../kernelbridge-license/packages/typescript`. Install its dependencies once with `npm install` in that package; `npm run build:main` builds the SDK before compiling the Server.
+
 Start the Electron app in development mode:
 
 ```bash
@@ -51,6 +53,8 @@ Build the main process and renderer:
 ```bash
 npm run build
 ```
+
+For Windows packaging, `scripts/package-win-unpacked.ps1` checks that the staged `better-sqlite3` module can actually open a database under the bundled Electron runtime. The native module installed for Node may not work in Electron. Build a matching Electron binary for the installed `better-sqlite3` version and pass its path with `-ElectronSqliteBinary` when needed. Use `-ReleaseDirectory` with a new directory name to preserve existing release artifacts; the script refuses to reuse that directory. Development signatures are not production code signatures.
 
 Run the built Electron app:
 
@@ -102,7 +106,20 @@ OFFLINE_CENTER_ID=
 OFFLINE_STORAGE_PATH=./data/offline.sqlite
 ALIGNEX_SYNC_BASE_URL=
 ALIGNEX_SYNC_TOKEN=
+KERNELBRIDGE_API_URL=https://kernelbridge.com/api/v1
+KERNELBRIDGE_ENTITLEMENT_PUBLIC_KEYS='{"<key-id>":"<base64-ed25519-public-key>"}'
+ALIGNEX_REQUIRE_KERNELBRIDGE_LICENSE=false
 ```
+
+AlignEx Center Server uses the KernelBridge TypeScript SDK in Electron's main process. Configure the KernelBridge API base URL and trusted Ed25519 public keys before activating a server. The public-key JSON maps each KernelBridge signing `key_id` to its PEM or base64-encoded public key. Provision these keys from a trusted KernelBridge administrator; do not download and trust them from an unauthenticated endpoint. The SDK's local cache signing key is generated automatically and encrypted with Electron `safeStorage`.
+
+After activation, **Settings > License and Device** shows the subscription plan and the verified installation entitlements, including their limits. The server refreshes the signed snapshot according to the SDK verification interval and offline grace policy; use Refresh in Settings to reload the displayed snapshot. The sidebar and feature navigation use the same verified feature projection. Legacy licenses do not provide a verified KernelBridge entitlement list.
+
+For the unpacked Windows application, place deployment configuration in `resources/.env` beside `app.asar`, or supply it through the process environment. Keep the public-key trust map aligned with the actual KernelBridge signing key and point the API URL at the KernelBridge instance reachable by the server.
+
+The AlignEx Platform must be configured with its KernelBridge integration credential and an active AlignEx account link. Server activation then exchanges the Platform's short-lived, installation-bound code directly with KernelBridge. Do not put a KernelBridge API credential in the Server's `.env`, renderer, or installer. AlignEx must be switched to Platform Account (or Hybrid) licensing mode by a KernelBridge administrator before this flow can complete. Existing installations are not automatically migrated or rebound.
+
+For rollout, first configure the API URL and trusted public keys while `ALIGNEX_REQUIRE_KERNELBRIDGE_LICENSE=false`. After confirming the Platform account link and product licensing mode, set it to `true` and restart the Server. Strict mode blocks legacy offline-file activation and prevents local plan data from substituting for KernelBridge entitlements. Keep it `false` only for an explicitly approved legacy transition.
 
 Code-based import calls:
 

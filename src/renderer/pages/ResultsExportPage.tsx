@@ -34,14 +34,6 @@ type ToastState = {
     message: string;
 };
 
-declare global {
-    interface Window {
-        alignex?: {
-            openExportFolder?: (folderPath: string) => Promise<{ success: boolean; message?: string }>;
-        };
-    }
-}
-
 const apiBaseUrl = 'http://127.0.0.1:4080';
 
 export function ResultsExportPage() {

@@ -17,6 +17,7 @@ export default defineConfig({
         admin: resolve(rootDir, 'index.html'),
         candidate: resolve(rootDir, 'candidate.html'),
         adaptive: resolve(rootDir, 'adaptive.html'),
+        readiness: resolve(rootDir, 'readiness.html'),
       },
     },
   },
